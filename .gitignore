@@ -3,6 +3,22 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# DAtabase files
+# *.db
+*.db-journal
+
+# Atom feeds
+*.atom
+
+# Mbox files
+*.mbox
+*.mbox.gzz
+
+# Test files
+test_*.py
+view_db.py
+quick_view.db
+
 # C extensions
 *.so
 
