@@ -4,10 +4,10 @@ __pycache__/
 *$py.class
 
 # DAtabase files
-*.db
+# *.db
 *.db-journal
 
-# Atom feeds 
+# Atom feeds
 *.atom
 
 # Mbox files
