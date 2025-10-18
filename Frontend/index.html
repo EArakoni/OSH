@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Daily News • All voices matter</title>
+  <style>
+    :root {
+      --color-bg: #ffffff;
+      --color-text: #222222;
+      --color-accent: #0055cc;
+      --color-heading: #111111;
+      --color-border: #dddddd;
+    }
+    [data-theme="dark"] {
+      --color-bg: #1a1a1a;
+      --color-text: #eeeeee;
+      --color-accent: #3399ff;
+      --color-heading: #ffffff;
+      --color-border: #444444;
+    }
+    body {
+      margin:0;
+      padding:0;
+      background: var(--color-bg);
+      color: var(--color-text);
+      font-family: sans-serif;
+      line-height: 1.5;
+    }
+    header {
+      padding: 1rem 2rem;
+      border-bottom: 1px solid var(--color-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    header .site-title {
+      font-size: 1.5rem;
+      font-weight: bold;
+      color: var(--color-heading);
+    }
+    nav ul {
+      list-style: none;
+      display: flex;
+      gap: 1rem;
+      margin: 0;
+      padding: 0;
+    }
+    nav a {
+      text-decoration: none;
+      color: var(--color-text);
+    }
+    .toggle-theme {
+      cursor: pointer;
+      background: none;
+      border: none;
+      font-size: 1rem;
+      color: var(--color-text);
+    }
+    main {
+      max-width: 1200px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+    }
+    .section-heading {
+      font-size: 1.25rem;
+      margin: 2rem 0 1rem;
+      border-left: 4px solid var(--color-accent);
+      padding-left: 0.75rem;
+      color: var(--color-heading);
+    }
+    .articles-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 1.5rem;
+    }
+    .article {
+      border: 1px solid var(--color-border);
+      border-radius: 4px;
+      overflow: hidden;
+      background: var(--color-bg);
+      transition: transform 0.2s ease;
+    }
+    .article:hover {
+      transform: translateY(-4px);
+    }
+    .article img {
+      width: 100%;
+      display: block;
+    }
+    .article-content {
+      padding: 0.75rem 1rem 1rem;
+    }
+    .article-content .date {
+      font-size: 0.9rem;
+      color: var(--color-text);
+      opacity: 0.6;
+    }
+    .article-content h3 {
+      margin:0.5rem 0 0;
+      font-size: 1.1rem;
+      color: var(--color-heading);
+    }
+    footer {
+      margin:4rem 0 2rem;
+      text-align: center;
+      font-size:0.9rem;
+      color: var(--color-text);
+      opacity: 0.6;
+    }
+  </style>
+</head>
+<body data-theme="light">
+  <header>
+    <div class="site-title">Daily News</div>
+    <nav>
+      <ul>
+        <li><a href="#">Home</a></li>
+ <!--       <li><a href="#">Culture</a></li>
+        <li><a href="#">Economy</a></li>
+        <li><a href="#">Politics</a></li>
+        <li><a href="#">Science</a></li>
+        <li><a href="#">Technology</a></li>
+        <li><a href="#">Travel</a></li>
+        <li><a href="#">World</a></li>-->
+      </ul>
+    </nav>
+    <button class="toggle-theme">🌙 Dark Mode</button>
+  </header>
+  <main>
+    <section>
+      <div class="section-heading">Breaking News</div>
+      <div class="articles-grid">
+        <article class="article">
+          <img src="https://via.placeholder.com/400x250" alt="Article image">
+          <div class="article-content">
+            <div class="date">Nov 17, 2023</div>
+            <h3>Augue Neque Gravida Fermentum Sollicitudin</h3>
+          </div>
+        </article>
+        <article class="article">
+          <img src="https://via.placeholder.com/400x250" alt="Article image">
+          <div class="article-content">
+            <div class="date">Nov 14, 2023</div>
+            <h3>Congue Quisque Egestas Diam Arcu Euismod</h3>
+          </div>
+        </article>
+        <article class="article">
+          <img src="https://via.placeholder.com/400x250" alt="Article image">
+          <div class="article-content">
+            < <div class="date">Nov 15, 2023</div>
+            <h3>Convallis Posuere Morbi Leo Orna Molestie</h3>
+          </div>
+        </article>
+        <article class="article">
+          <img src="https://via.placeholder.com/400x250" alt="Article image">
+          <div class="article-content">
+            <div class="date">Nov 14, 2023</div>
+            <h3>Turpis Egestas Sed Tempus Urna Pharetra</h3>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-heading">Popular News</div>
+      <div class="articles-grid">
+        <article class="article">
+          <img src="https://via.placeholder.com/400x250" alt="Article image">
+          <div class="article-content">
+            <div class="date">Nov 14, 2023</div>
+            <h3>Lacus Sedturpis Tincidunt Odaliquet Risus</h3>
+          </div>
+        </article>
+        <article class="article">
+          <img src="https://via.placeholder.com/400x250" alt="Article image">
+          <div class="article-content">
+            <div class="date">Nov 21, 2023</div>
+            <h3>Accumsan Tortor Posuere Acut Consequat Semper</h3>
+          </div>
+        </article>
+        <article class="article">
+          <img src="https://via.placeholder.com/400x250" alt="Article image">
+          <div class="article-content">
+            < <div class="date">Nov 14, 2023</div>
+            <h3>Diam Sollicitudin Tempor Eunisl Mipsum Faucibus</h3>
+          </div>
+        </article>
+        <article class="article">
+          <img src="https://via.placeholder.com/400x250" alt="Article image">
+          <div class="article-content">
+            <div class="date">Nov 21, 2023</div>
+            <h3>Bulvinar Neque Laoreet Suspendisse Interdum</h3>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- You can add additional sections: Trending, Editor Choice, etc. -->
+  </main>
+
+  <footer>
+    © 2025 Daily News. All rights reserved.
+  </footer>
+
+  <script>
+    const toggleBtn = document.querySelector('.toggle-theme');
+    toggleBtn.addEventListener('click', () => {
+      const htmlElem = document.documentElement;
+      const current = htmlElem.getAttribute('data-theme');
+      const next = (current === 'light') ? 'dark' : 'light';
+      htmlElem.setAttribute('data-theme', next);
+      toggleBtn.textContent = next === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode';
+    });
+  </script>
+</body>
+</html>
