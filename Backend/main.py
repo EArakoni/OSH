@@ -4,12 +4,22 @@ LKML Dashboard - Main entry point
 """
 
 import argparse
+import os
+import sys
 from src.parser.pipeline import LKMLPipeline
 from src.parser.atom_parser import AtomParser
 from src.parser.thread_builder import ThreadBuilder
 from src.database.db import Database
 from download_lkml import download_lkml_day, download_atom_feed
 import json
+# Import Gemini components (with graceful fallback)
+try:
+    from src.llm.gemini_client import GeminiClient
+    from src.llm.summarizer import LKMLSummarizer
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+    print("⚠️  Gemini summarization not available. Install: pip install google-generativeai")
 
 def download_and_process(date: str, db_path: str):
     """Download and process LKML for a specific date"""
@@ -24,6 +34,7 @@ def download_and_process(date: str, db_path: str):
         pipeline.process_mbox(mbox_file)
     finally:
         pipeline.close()
+
 
 def process_atom_feed(atom_file: str, db_path: str):
     """Process an Atom feed file"""
