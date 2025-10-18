@@ -8,16 +8,16 @@ __pycache__/
 *.db-journal
 
 # Atom feeds
-*.atom
+#*.atom
 
 # Mbox files
 *.mbox
 *.mbox.gzz
 
 # Test files
-test_*.py
-view_db.py
-quick_view.db
+# test_*.py
+# view_db.py
+# quick_view.db
 
 # C extensions
 *.so
