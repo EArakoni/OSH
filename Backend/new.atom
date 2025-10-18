@@ -1,0 +1,1199 @@
+<?xml version="1.0" encoding="us-ascii"?>
+<feed
+xmlns="http://www.w3.org/2005/Atom"
+xmlns:thr="http://purl.org/syndication/thread/1.0"><title>linux-kernel.vger.kernel.org archive mirror</title><link
+rel="alternate"
+type="text/html"
+href="https://lore.kernel.org/lkml/"/><link
+rel="self"
+href="https://lore.kernel.org/lkml/new.atom"/><id>mailto:linux-kernel@vger.kernel.org</id><updated>2025-10-18T19:47:47Z</updated><entry><author><name>Kriish Sharma</name><email>kriish.sharma2006@gmail.com</email></author><title>[PATCH] xfs: use kmalloc_array() instead of kmalloc() for map allocation</title><updated>2025-10-18T19:47:47Z</updated><link
+href="https://lore.kernel.org/lkml/20251018194528.1871298-1-kriish.sharma2006@gmail.com/"/><id>urn:uuid:0b30ab24-b8a8-ca51-cd4f-1e0109464063</id><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">Using kmalloc_array() better reflects the intent to allocate an array of
+map entries, and improves consistency with similar allocations across the
+kernel.
+
+No functional change intended.
+
+Signed-off-by: Kriish Sharma &lt;kriish.sharma2006@gmail.com&gt;
+---
+ fs/xfs/xfs_qm.c | 2 +-
+ 1 file <a href="https://lore.kernel.org/lkml/20251018194528.1871298-1-kriish.sharma2006@gmail.com/#related">changed</a>, 1 insertion(+), 1 deletion(-)
+
+<span
+class="head">diff --git a/fs/xfs/xfs_qm.c b/fs/xfs/xfs_qm.c
+index 23ba84ec919a..34ec61e455ff 100644
+--- a/fs/xfs/xfs_qm.c
++++ b/fs/xfs/xfs_qm.c
+</span><span
+class="hunk">@@ -1218,7 +1218,7 @@ xfs_qm_reset_dqcounts_buf(
+</span> 	if (qip-&gt;i_nblocks == 0)
+ 		return 0;
+ 
+<span
+class="del">-	map = kmalloc(XFS_DQITER_MAP_SIZE * sizeof(*map),
+</span><span
+class="add">+	map = kmalloc_array(XFS_DQITER_MAP_SIZE, sizeof(*map),
+</span> 			GFP_KERNEL | __GFP_NOFAIL);
+ 
+ 	lblkno = 0;
+-- 
+2.34.1
+
+</pre></div></content></entry><entry><author><name>Chuck Lever</name><email>chuck.lever@oracle.com</email></author><title>Re: [PATCH v2 11/11] nfsd: wire up GET_DIR_DELEGATION handling</title><updated>2025-10-18T19:47:09Z</updated><link
+href="https://lore.kernel.org/lkml/cc8a624b-6747-4566-b812-e27caf7861a9@oracle.com/"/><id>urn:uuid:a954d47a-f80a-d4b6-3296-550965d356d5</id><thr:in-reply-to
+ref="urn:uuid:8eaecc82-5ed1-92c6-6b2e-8dab00e3272b"
+href="https://lore.kernel.org/lkml/20251017-dir-deleg-ro-v2-11-8c8f6dd23c8b@kernel.org/"/><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">On 10/17/25 7:32 AM, Jeff Layton wrote:
+<span
+class="q">&gt; Add a new routine for acquiring a read delegation on a directory. These
+&gt; are recallable-only delegations with no support for CB_NOTIFY. That will
+&gt; be added in a later phase.
+&gt; 
+&gt; Since the same CB_RECALL/DELEGRETURN infrastrure is used for regular and
+&gt; directory delegations, a normal nfs4_delegation is used to represent a
+&gt; directory delegation.
+</span>
+s/infrastrure/infrastructure/
+
+
+<span
+class="q">&gt; Signed-off-by: Jeff Layton &lt;jlayton@kernel.org&gt;
+&gt; ---
+&gt;  fs/nfsd/nfs4proc.c  |  21 ++++++++++-
+&gt;  fs/nfsd/nfs4state.c | 100 ++++++++++++++++++++++++++++++++++++++++++++++++++++
+&gt;  fs/nfsd/state.h     |   5 +++
+&gt;  3 files changed, 125 insertions(+), 1 deletion(-)
+&gt; 
+&gt; diff --git a/fs/nfsd/nfs4proc.c b/fs/nfsd/nfs4proc.c
+&gt; index 7f7e6bb23a90d9a1cafd154c0f09e236df75b083..527f8dc52159803770964700170473509ec328ed 100644
+&gt; --- a/fs/nfsd/nfs4proc.c
+&gt; +++ b/fs/nfsd/nfs4proc.c
+&gt; @@ -2342,6 +2342,13 @@ nfsd4_get_dir_delegation(struct svc_rqst *rqstp,
+&gt;  			 union nfsd4_op_u *u)
+&gt;  {
+&gt;  	struct nfsd4_get_dir_delegation *gdd = &#38;u-&gt;get_dir_delegation;
+&gt; +	struct nfs4_delegation *dd;
+&gt; +	struct nfsd_file *nf;
+&gt; +	__be32 status;
+&gt; +
+&gt; +	status = nfsd_file_acquire_dir(rqstp, &#38;cstate-&gt;current_fh, &#38;nf);
+&gt; +	if (status != nfs_ok)
+&gt; +		return status;
+&gt;  
+&gt;  	/*
+&gt;  	 * RFC 8881, section 18.39.3 says:
+&gt; @@ -2355,7 +2362,19 @@ nfsd4_get_dir_delegation(struct svc_rqst *rqstp,
+&gt;  	 * return NFS4_OK with a non-fatal status of GDD4_UNAVAIL in this
+&gt;  	 * situation.
+&gt;  	 */
+&gt; -	gdd-&gt;gddrnf_status = GDD4_UNAVAIL;
+&gt; +	dd = nfsd_get_dir_deleg(cstate, gdd, nf);
+&gt; +	if (IS_ERR(dd)) {
+&gt; +		int err = PTR_ERR(dd);
+&gt; +
+&gt; +		if (err != -EAGAIN)
+&gt; +			return nfserrno(err);
+&gt; +		gdd-&gt;gddrnf_status = GDD4_UNAVAIL;
+&gt; +		return nfs_ok;
+&gt; +	}
+</span>
+These error flows might leak the nf acquired just above.
+
+
+<span
+class="q">&gt; +
+&gt; +	gdd-&gt;gddrnf_status = GDD4_OK;
+&gt; +	memcpy(&#38;gdd-&gt;gddr_stateid, &#38;dd-&gt;dl_stid.sc_stateid, sizeof(gdd-&gt;gddr_stateid));
+&gt; +	nfs4_put_stid(&#38;dd-&gt;dl_stid);
+&gt;  	return nfs_ok;
+&gt;  }
+&gt;  
+&gt; diff --git a/fs/nfsd/nfs4state.c b/fs/nfsd/nfs4state.c
+&gt; index b06591f154aa372db710e071c69260f4639956d7..a63e8c885291fc377163f3255f26f5f693704437 100644
+&gt; --- a/fs/nfsd/nfs4state.c
+&gt; +++ b/fs/nfsd/nfs4state.c
+&gt; @@ -9359,3 +9359,103 @@ nfsd4_deleg_getattr_conflict(struct svc_rqst *rqstp, struct dentry *dentry,
+&gt;  	nfs4_put_stid(&#38;dp-&gt;dl_stid);
+&gt;  	return status;
+&gt;  }
+&gt; +
+&gt; +/**
+&gt; + * nfsd_get_dir_deleg - attempt to get a directory delegation
+&gt; + * @cstate: compound state
+&gt; + * @gdd: GET_DIR_DELEGATION arg/resp structure
+&gt; + * @nf: nfsd_file opened on the directory
+&gt; + *
+&gt; + * Given a GET_DIR_DELEGATION request @gdd, attempt to acquire a delegation
+&gt; + * on the directory to which @nf refers. Note that this does not set up any
+&gt; + * sort of async notifications for the delegation.
+&gt; + */
+&gt; +struct nfs4_delegation *
+&gt; +nfsd_get_dir_deleg(struct nfsd4_compound_state *cstate,
+&gt; +		   struct nfsd4_get_dir_delegation *gdd,
+&gt; +		   struct nfsd_file *nf)
+&gt; +{
+&gt; +	struct nfs4_client *clp = cstate-&gt;clp;
+&gt; +	struct nfs4_delegation *dp;
+&gt; +	struct file_lease *fl;
+&gt; +	struct nfs4_file *fp, *rfp;
+&gt; +	int status = 0;
+&gt; +
+&gt; +	fp = nfsd4_alloc_file();
+&gt; +	if (!fp)
+&gt; +		return ERR_PTR(-ENOMEM);
+&gt; +
+&gt; +	nfsd4_file_init(&#38;cstate-&gt;current_fh, fp);
+&gt; +
+&gt; +	rfp = nfsd4_file_hash_insert(fp, &#38;cstate-&gt;current_fh);
+&gt; +	if (unlikely(!rfp)) {
+&gt; +		put_nfs4_file(fp);
+&gt; +		return ERR_PTR(-ENOMEM);
+&gt; +	}
+&gt; +
+&gt; +	if (rfp != fp) {
+&gt; +		put_nfs4_file(fp);
+&gt; +		fp = rfp;
+&gt; +	}
+&gt; +
+&gt; +	/* if this client already has one, return that it&#39;s unavailable */
+&gt; +	spin_lock(&#38;state_lock);
+&gt; +	spin_lock(&#38;fp-&gt;fi_lock);
+&gt; +	/* existing delegation? */
+&gt; +	if (nfs4_delegation_exists(clp, fp)) {
+&gt; +		status = -EAGAIN;
+&gt; +	} else if (!fp-&gt;fi_deleg_file) {
+&gt; +		fp-&gt;fi_deleg_file = nf;
+&gt; +		fp-&gt;fi_delegees = 1;
+&gt; +	} else {
+&gt; +		++fp-&gt;fi_delegees;
+</span>
+The new nf is unused in this arm. Does it need to be released?
+
+
+<span
+class="q">&gt; +	}
+&gt; +	spin_unlock(&#38;fp-&gt;fi_lock);
+&gt; +	spin_unlock(&#38;state_lock);
+&gt; +
+&gt; +	if (status) {
+&gt; +		put_nfs4_file(fp);
+&gt; +		return ERR_PTR(status);
+&gt; +	}
+&gt; +
+&gt; +	/* Try to set up the lease */
+&gt; +	status = -ENOMEM;
+&gt; +	dp = alloc_init_deleg(clp, fp, NULL, NFS4_OPEN_DELEGATE_READ);
+&gt; +	if (!dp)
+&gt; +		goto out_delegees;
+&gt; +
+&gt; +	fl = nfs4_alloc_init_lease(dp);
+&gt; +	if (!fl)
+&gt; +		goto out_put_stid;
+&gt; +
+&gt; +	status = kernel_setlease(nf-&gt;nf_file,
+&gt; +				 fl-&gt;c.flc_type, &#38;fl, NULL);
+&gt; +	if (fl)
+&gt; +		locks_free_lease(fl);
+&gt; +	if (status)
+&gt; +		goto out_put_stid;
+&gt; +
+&gt; +	/*
+&gt; +	 * Now, try to hash it. This can fail if we race another nfsd task
+&gt; +	 * trying to set a delegation on the same file. If that happens,
+&gt; +	 * then just say UNAVAIL.
+&gt; +	 */
+&gt; +	spin_lock(&#38;state_lock);
+&gt; +	spin_lock(&#38;clp-&gt;cl_lock);
+&gt; +	spin_lock(&#38;fp-&gt;fi_lock);
+&gt; +	status = hash_delegation_locked(dp, fp);
+&gt; +	spin_unlock(&#38;fp-&gt;fi_lock);
+&gt; +	spin_unlock(&#38;clp-&gt;cl_lock);
+&gt; +	spin_unlock(&#38;state_lock);
+&gt; +
+&gt; +	if (!status)
+&gt; +		return dp;
+&gt; +
+&gt; +	/* Something failed. Drop the lease and clean up the stid */
+&gt; +	kernel_setlease(fp-&gt;fi_deleg_file-&gt;nf_file, F_UNLCK, NULL, (void **)&#38;dp);
+&gt; +out_put_stid:
+&gt; +	nfs4_put_stid(&#38;dp-&gt;dl_stid);
+&gt; +out_delegees:
+&gt; +	put_deleg_file(fp);
+&gt; +	return ERR_PTR(status);
+&gt; +}
+&gt; diff --git a/fs/nfsd/state.h b/fs/nfsd/state.h
+&gt; index 1e736f4024263ffa9c93bcc9ec48f44566a8cc77..b052c1effdc5356487c610db9728df8ecfe851d4 100644
+&gt; --- a/fs/nfsd/state.h
+&gt; +++ b/fs/nfsd/state.h
+&gt; @@ -867,4 +867,9 @@ static inline bool try_to_expire_client(struct nfs4_client *clp)
+&gt;  
+&gt;  extern __be32 nfsd4_deleg_getattr_conflict(struct svc_rqst *rqstp,
+&gt;  		struct dentry *dentry, struct nfs4_delegation **pdp);
+&gt; +
+&gt; +struct nfsd4_get_dir_delegation;
+&gt; +struct nfs4_delegation *nfsd_get_dir_deleg(struct nfsd4_compound_state *cstate,
+&gt; +						struct nfsd4_get_dir_delegation *gdd,
+&gt; +						struct nfsd_file *nf);
+&gt;  #endif   /* NFSD4_STATE_H */
+&gt; 
+</span>
+
+-- 
+Chuck Lever
+</pre></div></content></entry><entry><author><name>Andy Shevchenko</name><email>andriy.shevchenko@linux.intel.com</email></author><title>Re: [resend, PATCH v2 1/1] kexec: Remove unused code in kimage_load_cma_segment()</title><updated>2025-10-18T19:44:14Z</updated><link
+href="https://lore.kernel.org/lkml/aPPuCIyL3yuxGQMR@ashevche-desk.local/"/><id>urn:uuid:ca845892-8aae-c33b-08e4-c6f08dff0964</id><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">
+On Tue, Sep 23, 2025 at 10:50:55AM -0700, Justinien Bouron wrote:
+<span
+class="q">&gt; On Tue, Sep 16, 2025 at 02:51:09PM +0200, Andy Shevchenko wrote:
+&gt; &gt; clang is not happy about set but unused variable:
+&gt; &gt; 
+&gt; &gt; kernel/kexec_core.c:745:16: error: variable &#39;maddr&#39; set but not used [-Werror,-Wunused-but-set-variable]
+&gt; &gt;   745 |         unsigned long maddr;
+&gt; &gt;       |                       ^
+&gt; &gt; 1 error generated.
+&gt; &gt; 
+&gt; &gt; Fix the compilation breakage (`make W=1` build) by removing unused variable.
+&gt; &gt; 
+&gt; &gt; As Nathan noted, GCC 16 produces the similar warning;
+&gt; &gt; 
+&gt; &gt; Fixes: f4fecb50d6e1 (&#34;kexec_core: remove superfluous page offset handling in segment loading&#34;)
+&gt; FYI the commit this patch is fixing (i.e. f4fecb50d6e1) is going to need a
+&gt; second revision as well (I haven&#39;t submitted it yet, still working on it), this
+&gt; means that your &#34;Fixes:&#34; tag will need to be changed again, requiring a 3rd
+&gt; revision.
+&gt; 
+&gt; I am not sure what is the proper way forward here. Should I:
+&gt;     - Send my v2, without fixing the unused variable and then you send your v3
+&gt;       with the updated &#34;Fixes:&#34; tag pointing to my v2.
+&gt;     - OR fixing the unused variable in my v2 (i.e. &#34;absorb&#34; this patch in my
+&gt;       v2).
+</span>
+Second is the best (integrate this fix into yours v2).
+
+<span
+class="q">&gt; In the latter case, I am not sure how I am supposed to credit the work in this
+&gt; case? Do I need to add another &#34;Signed-off-by: Andy Shevchenko&#34; besides mine?
+</span>
+Just in the comment block (after the cutter &#39;---&#39; line and before the diff) in
+a free words. No need for any special tags for this in such a case.
+
+<span
+class="q">&gt; I&#39;m still learning the ropes on how to contribute through the mailing list so I
+&gt; would be grateful if you could share your input on what&#39;s the proper way forward
+&gt; here.
+</span>
+-- 
+With Best Regards,
+Andy Shevchenko
+
+
+</pre></div></content></entry><entry><author><name>Andy Shevchenko</name><email>andriy.shevchenko@linux.intel.com</email></author><title>Re: [PATCH 3/8] sparc: floppy: Replace deprecated strcpy with strscpy in sun_floppy_init</title><updated>2025-10-18T19:38:53Z</updated><link
+href="https://lore.kernel.org/lkml/aPPsx9cHwkF8MC1l@ashevche-desk.local/"/><id>urn:uuid:87cd6b6f-3896-d1e1-89d0-e33acd57dc66</id><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">
+On Mon, Sep 22, 2025 at 11:03:52PM +0200, Thorsten Blum wrote:
+<span
+class="q">&gt; strcpy() is deprecated; use strscpy() instead.
+&gt; 
+&gt; No functional changes intended.
+</span>
+Is this the only one place in floppy (arch) code?
+
+The change itself LGTM,
+Reviewed-by: Andy Shevchenko &lt;andriy.shevchenko@linux.intel.com&gt;
+
+-- 
+With Best Regards,
+Andy Shevchenko
+
+
+</pre></div></content></entry><entry><author><name>Chuck Lever</name><email>chuck.lever@oracle.com</email></author><title>Re: [PATCH v2 10/11] nfsd: allow DELEGRETURN on directories</title><updated>2025-10-18T19:38:27Z</updated><link
+href="https://lore.kernel.org/lkml/ec15f97d-b9be-4bb0-b099-08d964f7f89a@oracle.com/"/><id>urn:uuid:1a5d8c91-5ffb-83e9-c200-d06f532d65ec</id><thr:in-reply-to
+ref="urn:uuid:a67e4bad-593e-59bc-b322-2943f54b3342"
+href="https://lore.kernel.org/lkml/20251017-dir-deleg-ro-v2-10-8c8f6dd23c8b@kernel.org/"/><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">On 10/17/25 7:32 AM, Jeff Layton wrote:
+<span
+class="q">&gt; As Trond pointed out: &#34;...provided that the presented stateid is
+&gt; actually valid, it is also sufficient to uniquely identify the file to
+&gt; which it is associated (see RFC8881 Section 8.2.4), so the filehandle
+&gt; should be considered mostly irrelevant for operations like DELEGRETURN.&#34;
+&gt; 
+&gt; Don&#39;t ask fh_verify to filter on file type.
+&gt; 
+&gt; Signed-off-by: Jeff Layton &lt;jlayton@kernel.org&gt;
+&gt; ---
+&gt;  fs/nfsd/nfs4state.c | 3 ++-
+&gt;  1 file changed, 2 insertions(+), 1 deletion(-)
+&gt; 
+&gt; diff --git a/fs/nfsd/nfs4state.c b/fs/nfsd/nfs4state.c
+&gt; index c9053ef4d79f074f49ecaf0c7a3db78ec147136e..b06591f154aa372db710e071c69260f4639956d7 100644
+&gt; --- a/fs/nfsd/nfs4state.c
+&gt; +++ b/fs/nfsd/nfs4state.c
+&gt; @@ -7824,7 +7824,8 @@ nfsd4_delegreturn(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
+&gt;  	__be32 status;
+&gt;  	struct nfsd_net *nn = net_generic(SVC_NET(rqstp), nfsd_net_id);
+&gt;  
+&gt; -	if ((status = fh_verify(rqstp, &#38;cstate-&gt;current_fh, S_IFREG, 0)))
+&gt; +	status = fh_verify(rqstp, &#38;cstate-&gt;current_fh, 0, 0);
+&gt; +	if (status)
+&gt;  		return status;
+&gt;  
+&gt;  	status = nfsd4_lookup_stateid(cstate, stateid, SC_TYPE_DELEG, SC_STATUS_REVOKED, &#38;s, nn);
+&gt; 
+</span>
+Reviewed-by: Chuck Lever &lt;chuck.lever@oracle.com&gt;
+
+-- 
+Chuck Lever
+</pre></div></content></entry><entry><author><name>Andy Shevchenko</name><email>andriy.shevchenko@linux.intel.com</email></author><title>Re: [PATCH] ACPI: property: Fix argument order in __acpi_node_get_property_reference()</title><updated>2025-10-18T19:38:06Z</updated><link
+href="https://lore.kernel.org/lkml/aPPsmKRcB9YKYNGB@ashevche-desk.local/"/><id>urn:uuid:e5897ecd-d601-758e-fe5f-a440de7e8622</id><thr:in-reply-to
+ref="urn:uuid:0b7885f4-5844-c72c-8ad8-1f7956e08d88"
+href="https://lore.kernel.org/lkml/20251017100744.71871-1-sunilvl@ventanamicro.com/"/><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">On Fri, Oct 17, 2025 at 03:37:44PM +0530, Sunil V L wrote:
+<span
+class="q">&gt; A refactoring bug introduced an argument order mistake in the call to
+&gt; acpi_fwnode_get_reference_args() from __acpi_node_get_property_reference().
+&gt; This caused incorrect behavior when resolving ACPI property references.
+&gt; 
+&gt; Fix the issue by correcting the argument order.
+</span>
+Thanks for a fix which looks good to me,
+Reviewed-by: Andy Shevchenko &lt;andriy.shevchenko@linux.intel.com&gt;
+
+-- 
+With Best Regards,
+Andy Shevchenko
+
+
+</pre></div></content></entry><entry><author><name>Andy Shevchenko</name><email>andriy.shevchenko@linux.intel.com</email></author><title>Re: [REGRESSION] in 6.18-rc1, failed to query a GPIO using a name in ACPI</title><updated>2025-10-18T19:35:05Z</updated><link
+href="https://lore.kernel.org/lkml/aPPr42qP-NEmGO5v@ashevche-desk.local/"/><id>urn:uuid:bab766e0-c41a-bf35-5cae-5d033c0453e9</id><thr:in-reply-to
+ref="urn:uuid:6c6554db-3194-43b6-03f7-d2ed61212f7e"
+href="https://lore.kernel.org/lkml/aPPnC6gSP4r46gBV@ashevche-desk.local/"/><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">On Sat, Oct 18, 2025 at 10:14:19PM +0300, Andy Shevchenko wrote:
+<span
+class="q">&gt; On Fri, Oct 17, 2025 at 03:32:26PM +0530, Sunil V L wrote:
+&gt; &gt; On Fri, Oct 17, 2025 at 10:50:05AM +0200, Thomas Richard wrote:
+</span>
+Seems I have had an issue with my email, and everything is now fine.
+
+<span
+class="q">&gt; &gt; I&#39;ll send out the patch shortly and include your Tested-by tag.
+&gt; &gt; 
+&gt; &gt; Apologies for the earlier issue, and thank you for your help.
+&gt; 
+&gt; I haven&#39;t received anything. Have you sent anything? Am I Cc&#39;ed?
+</span>
+-- 
+With Best Regards,
+Andy Shevchenko
+
+
+</pre></div></content></entry><entry><author><name>Chuck Lever</name><email>chuck.lever@oracle.com</email></author><title>Re: [PATCH v2 09/11] nfsd: allow filecache to hold S_IFDIR files</title><updated>2025-10-18T19:34:11Z</updated><link
+href="https://lore.kernel.org/lkml/21904951-0cac-4a79-9be6-7dbf2f9849b6@oracle.com/"/><id>urn:uuid:cfa39790-2d83-3f7d-7d3c-96974773c8d9</id><thr:in-reply-to
+ref="urn:uuid:47815294-424f-2f71-3e67-495bc43d3a41"
+href="https://lore.kernel.org/lkml/20251017-dir-deleg-ro-v2-9-8c8f6dd23c8b@kernel.org/"/><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">On 10/17/25 7:32 AM, Jeff Layton wrote:
+<span
+class="q">&gt; The filecache infrastructure will only handle S_IFREG files at the
+&gt; moment. Directory delegations will require adding support for opening
+&gt; S_IFDIR inodes.
+&gt; 
+&gt; Plumb a &#34;type&#34; argument into nfsd_file_do_acquire() and have all of the
+&gt; existing callers set it to S_IFREG. Add a new nfsd_file_acquire_dir()
+&gt; wrapper that nfsd can call to request a nfsd_file that holds a directory
+&gt; open.
+&gt; 
+&gt; For now, there is no need for a fsnotify_mark for directories, as
+&gt; CB_NOTIFY is not yet supported. Change nfsd_file_do_acquire() to avoid
+&gt; allocating one for non-S_IFREG inodes.
+&gt; 
+&gt; Signed-off-by: Jeff Layton &lt;jlayton@kernel.org&gt;
+&gt; ---
+&gt;  fs/nfsd/filecache.c | 57 ++++++++++++++++++++++++++++++++++++++++-------------
+&gt;  fs/nfsd/filecache.h |  2 ++
+&gt;  fs/nfsd/vfs.c       |  5 +++--
+&gt;  fs/nfsd/vfs.h       |  2 +-
+&gt;  4 files changed, 49 insertions(+), 17 deletions(-)
+&gt; 
+&gt; diff --git a/fs/nfsd/filecache.c b/fs/nfsd/filecache.c
+&gt; index a238b6725008a5c2988bd3da874d1f34ee778437..93798575b8075c63f95cd415b6d24df706ada0f6 100644
+&gt; --- a/fs/nfsd/filecache.c
+&gt; +++ b/fs/nfsd/filecache.c
+&gt; @@ -1086,7 +1086,7 @@ nfsd_file_do_acquire(struct svc_rqst *rqstp, struct net *net,
+&gt;  		     struct auth_domain *client,
+&gt;  		     struct svc_fh *fhp,
+&gt;  		     unsigned int may_flags, struct file *file,
+&gt; -		     struct nfsd_file **pnf, bool want_gc)
+&gt; +		     umode_t type, bool want_gc, struct nfsd_file **pnf)
+&gt;  {
+&gt;  	unsigned char need = may_flags &#38; NFSD_FILE_MAY_MASK;
+&gt;  	struct nfsd_file *new, *nf;
+&gt; @@ -1097,13 +1097,13 @@ nfsd_file_do_acquire(struct svc_rqst *rqstp, struct net *net,
+&gt;  	int ret;
+&gt;  
+&gt;  retry:
+&gt; -	if (rqstp) {
+&gt; -		status = fh_verify(rqstp, fhp, S_IFREG,
+&gt; +	if (rqstp)
+&gt; +		status = fh_verify(rqstp, fhp, type,
+&gt;  				   may_flags|NFSD_MAY_OWNER_OVERRIDE);
+&gt; -	} else {
+&gt; -		status = fh_verify_local(net, cred, client, fhp, S_IFREG,
+&gt; +	else
+&gt; +		status = fh_verify_local(net, cred, client, fhp, type,
+&gt;  					 may_flags|NFSD_MAY_OWNER_OVERRIDE);
+&gt; -	}
+&gt; +
+&gt;  	if (status != nfs_ok)
+&gt;  		return status;
+&gt;  	inode = d_inode(fhp-&gt;fh_dentry);
+&gt; @@ -1176,15 +1176,18 @@ nfsd_file_do_acquire(struct svc_rqst *rqstp, struct net *net,
+&gt;  
+&gt;  open_file:
+&gt;  	trace_nfsd_file_alloc(nf);
+&gt; -	nf-&gt;nf_mark = nfsd_file_mark_find_or_create(inode);
+&gt; -	if (nf-&gt;nf_mark) {
+&gt; +
+&gt; +	if (type == S_IFREG)
+&gt; +		nf-&gt;nf_mark = nfsd_file_mark_find_or_create(inode);
+&gt; +
+&gt; +	if (type != S_IFREG || nf-&gt;nf_mark) {
+&gt;  		if (file) {
+&gt;  			get_file(file);
+&gt;  			nf-&gt;nf_file = file;
+&gt;  			status = nfs_ok;
+&gt;  			trace_nfsd_file_opened(nf, status);
+&gt;  		} else {
+&gt; -			ret = nfsd_open_verified(fhp, may_flags, &#38;nf-&gt;nf_file);
+&gt; +			ret = nfsd_open_verified(fhp, type, may_flags, &#38;nf-&gt;nf_file);
+&gt;  			if (ret == -EOPENSTALE &#38;&#38; stale_retry) {
+&gt;  				stale_retry = false;
+&gt;  				nfsd_file_unhash(nf);
+&gt; @@ -1246,7 +1249,7 @@ nfsd_file_acquire_gc(struct svc_rqst *rqstp, struct svc_fh *fhp,
+&gt;  		     unsigned int may_flags, struct nfsd_file **pnf)
+&gt;  {
+&gt;  	return nfsd_file_do_acquire(rqstp, SVC_NET(rqstp), NULL, NULL,
+&gt; -				    fhp, may_flags, NULL, pnf, true);
+&gt; +				    fhp, may_flags, NULL, S_IFREG, true, pnf);
+&gt;  }
+&gt;  
+&gt;  /**
+&gt; @@ -1271,7 +1274,7 @@ nfsd_file_acquire(struct svc_rqst *rqstp, struct svc_fh *fhp,
+&gt;  		  unsigned int may_flags, struct nfsd_file **pnf)
+&gt;  {
+&gt;  	return nfsd_file_do_acquire(rqstp, SVC_NET(rqstp), NULL, NULL,
+&gt; -				    fhp, may_flags, NULL, pnf, false);
+&gt; +				    fhp, may_flags, NULL, S_IFREG, false, pnf);
+&gt;  }
+&gt;  
+&gt;  /**
+&gt; @@ -1314,8 +1317,8 @@ nfsd_file_acquire_local(struct net *net, struct svc_cred *cred,
+&gt;  	const struct cred *save_cred = get_current_cred();
+&gt;  	__be32 beres;
+&gt;  
+&gt; -	beres = nfsd_file_do_acquire(NULL, net, cred, client,
+&gt; -				     fhp, may_flags, NULL, pnf, false);
+&gt; +	beres = nfsd_file_do_acquire(NULL, net, cred, client, fhp, may_flags,
+&gt; +				     NULL, S_IFREG, false, pnf);
+&gt;  	put_cred(revert_creds(save_cred));
+&gt;  	return beres;
+&gt;  }
+&gt; @@ -1344,7 +1347,33 @@ nfsd_file_acquire_opened(struct svc_rqst *rqstp, struct svc_fh *fhp,
+&gt;  			 struct nfsd_file **pnf)
+&gt;  {
+&gt;  	return nfsd_file_do_acquire(rqstp, SVC_NET(rqstp), NULL, NULL,
+&gt; -				    fhp, may_flags, file, pnf, false);
+&gt; +				    fhp, may_flags, file, S_IFREG, false, pnf);
+&gt; +}
+&gt; +
+&gt; +/**
+&gt; + * nfsd_file_acquire_dir - Get a struct nfsd_file with an open directory
+&gt; + * @rqstp: the RPC transaction being executed
+&gt; + * @fhp: the NFS filehandle of the file to be opened
+&gt; + * @pnf: OUT: new or found &#34;struct nfsd_file&#34; object
+&gt; + *
+&gt; + * The nfsd_file_object returned by this API is reference-counted
+&gt; + * but not garbage-collected. The object is unhashed after the
+&gt; + * final nfsd_file_put(). This opens directories only, and only
+&gt; + * in O_RDONLY mode.
+&gt; + *
+&gt; + * Return values:
+&gt; + *   %nfs_ok - @pnf points to an nfsd_file with its reference
+&gt; + *   count boosted.
+&gt; + *
+&gt; + * On error, an nfsstat value in network byte order is returned.
+&gt; + */
+&gt; +__be32
+&gt; +nfsd_file_acquire_dir(struct svc_rqst *rqstp, struct svc_fh *fhp,
+&gt; +		      struct nfsd_file **pnf)
+&gt; +{
+&gt; +	return nfsd_file_do_acquire(rqstp, SVC_NET(rqstp), NULL, NULL, fhp,
+&gt; +				    NFSD_MAY_READ|NFSD_MAY_64BIT_COOKIE,
+&gt; +				    NULL, S_IFDIR, false, pnf);
+&gt;  }
+&gt;  
+&gt;  /*
+&gt; diff --git a/fs/nfsd/filecache.h b/fs/nfsd/filecache.h
+&gt; index e3d6ca2b60308e5e91ba4bb32d935f54527d8bda..b383dbc5b9218d21a29b852572f80fab08de9fa9 100644
+&gt; --- a/fs/nfsd/filecache.h
+&gt; +++ b/fs/nfsd/filecache.h
+&gt; @@ -82,5 +82,7 @@ __be32 nfsd_file_acquire_opened(struct svc_rqst *rqstp, struct svc_fh *fhp,
+&gt;  __be32 nfsd_file_acquire_local(struct net *net, struct svc_cred *cred,
+&gt;  			       struct auth_domain *client, struct svc_fh *fhp,
+&gt;  			       unsigned int may_flags, struct nfsd_file **pnf);
+&gt; +__be32 nfsd_file_acquire_dir(struct svc_rqst *rqstp, struct svc_fh *fhp,
+&gt; +		  struct nfsd_file **pnf);
+&gt;  int nfsd_file_cache_stats_show(struct seq_file *m, void *v);
+&gt;  #endif /* _FS_NFSD_FILECACHE_H */
+&gt; diff --git a/fs/nfsd/vfs.c b/fs/nfsd/vfs.c
+&gt; index eeb138569eba5df6de361cf6ba29604722e14af9..12c33223b612664dbb3b18b591e97fc708165763 100644
+&gt; --- a/fs/nfsd/vfs.c
+&gt; +++ b/fs/nfsd/vfs.c
+&gt; @@ -959,15 +959,16 @@ nfsd_open(struct svc_rqst *rqstp, struct svc_fh *fhp, umode_t type,
+&gt;  /**
+&gt;   * nfsd_open_verified - Open a regular file for the filecache
+&gt;   * @fhp: NFS filehandle of the file to open
+&gt; + * @type: S_IFMT inode type allowed (0 means any type is allowed)
+&gt;   * @may_flags: internal permission flags
+&gt;   * @filp: OUT: open &#34;struct file *&#34;
+&gt;   *
+&gt;   * Returns zero on success, or a negative errno value.
+&gt;   */
+&gt;  int
+&gt; -nfsd_open_verified(struct svc_fh *fhp, int may_flags, struct file **filp)
+&gt; +nfsd_open_verified(struct svc_fh *fhp, umode_t type, int may_flags, struct file **filp)
+&gt;  {
+&gt; -	return __nfsd_open(fhp, S_IFREG, may_flags, filp);
+&gt; +	return __nfsd_open(fhp, type, may_flags, filp);
+&gt;  }
+&gt;  
+&gt;  /*
+&gt; diff --git a/fs/nfsd/vfs.h b/fs/nfsd/vfs.h
+&gt; index fa46f8b5f132079e3a2c45e71ecf9cc43181f6b0..ded2900d423f80d33fb6c8b809bc5d9fc842ebfd 100644
+&gt; --- a/fs/nfsd/vfs.h
+&gt; +++ b/fs/nfsd/vfs.h
+&gt; @@ -114,7 +114,7 @@ __be32		nfsd_setxattr(struct svc_rqst *rqstp, struct svc_fh *fhp,
+&gt;  int 		nfsd_open_break_lease(struct inode *, int);
+&gt;  __be32		nfsd_open(struct svc_rqst *, struct svc_fh *, umode_t,
+&gt;  				int, struct file **);
+&gt; -int		nfsd_open_verified(struct svc_fh *fhp, int may_flags,
+&gt; +int		nfsd_open_verified(struct svc_fh *fhp, umode_t type, int may_flags,
+&gt;  				struct file **filp);
+&gt;  __be32		nfsd_splice_read(struct svc_rqst *rqstp, struct svc_fh *fhp,
+&gt;  				struct file *file, loff_t offset,
+&gt; 
+</span>
+Reviewed-by: Chuck Lever &lt;chuck.lever@oracle.com&gt;
+
+These can probably go in via Christian&#39;s tree. I don&#39;t think there
+are going to be conflicts between these and what&#39;s in nfsd-testing
+now.
+
+-- 
+Chuck Lever
+</pre></div></content></entry><entry><author><name>Andy Shevchenko</name><email>andriy.shevchenko@linux.intel.com</email></author><title>Re: [PATCH v2] serial: 8250_pcilib: Replace deprecated PCI functions</title><updated>2025-10-18T19:33:20Z</updated><link
+href="https://lore.kernel.org/lkml/aPPreT00iiTDzJwG@ashevche-desk.local/"/><id>urn:uuid:bf5ffc8c-05de-28ad-1259-8031cb3d0449</id><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">On Tue, Sep 30, 2025 at 09:27:43AM +0200, Florian Eckert wrote:
+<span
+class="q">&gt; When the &#39;8250_exar&#39; module is loaded into the kernel, a kernel trace
+&gt; with &#39;WARN_ON(legacy_iomap_table[bar])&#39; is dumped to the console,
+&gt; because the old pci table mapping is still used in &#39;8250_pcilib&#39;.
+&gt; 
+&gt; The old function have been deprecated in commit e354bb84a4c1 (&#34;PCI:
+&gt; Deprecate pcim_iomap_table(), pcim_iomap_regions_request_all()&#34;).
+&gt; 
+&gt; The remapping already takes or must take place in the driver that calls
+&gt; the function &#39;serial8250_pci_setup_port()&#39;. The remapping should only be
+&gt; called once via &#39;pcim_iomap()&#39;. Therefore the remapping moved to the
+&gt; caller of &#39;serial8250_pci_setup_port()&#39;.
+&gt; 
+&gt; To replace the outdated/legacy iomap_table processing in &#39;8250_pcilib&#39; the
+&gt; function signature of &#39;serial8250_pci_setup_port()&#39; has been extended with
+&gt; an already iomapped address value. So this can be used directly without
+&gt; io mapping again.
+</span>
+...
+
+<span
+class="q">&gt; +	if (pci_resource_flags(priv-&gt;dev, bar) &#38; IORESOURCE_MEM) {
+</span>
+Dunno if this is included already in Linux Next, but here is room for
+improvement.
+
+The problem with the above code is it (wrongly?) checks for bit and not
+for the resource type. OTOH I don&#39;t remember if 64-bit version requires
+the IORESOURCE_MEM to be set along with that.
+
+
+<span
+class="q">&gt; +		iomem = pcim_iomap(priv-&gt;dev, bar, 0);
+&gt; +		if (!iomem)
+&gt; +			return -ENOMEM;
+&gt; +	}
+</span>
+
+-- 
+With Best Regards,
+Andy Shevchenko
+
+
+</pre></div></content></entry><entry><author><name>Andy Shevchenko</name><email>andriy.shevchenko@linux.intel.com</email></author><title>Re: [PATCH v2] pinctrl: mcp23s08: delete regmap reg_defaults to avoid cache sync issues</title><updated>2025-10-18T19:31:28Z</updated><link
+href="https://lore.kernel.org/lkml/aPPrCv7arEYAOoS9@ashevche-desk.local/"/><id>urn:uuid:f7519a69-afc2-37ca-dc79-d428d4ae9e3f</id><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">
+On Mon, Oct 13, 2025 at 03:22:19PM +0200, Linus Walleij wrote:
+<span
+class="q">&gt; Hi Maksim,
+&gt; 
+&gt; thanks for your patch!
+&gt; 
+&gt; On Thu, Oct 9, 2025 at 3:29&#8239;PM &lt;bigunclemax@gmail.com&gt; wrote:
+&gt; &gt;
+&gt; &gt; From: Maksim Kiselev &lt;bigunclemax@gmail.com&gt;
+&gt; &gt;
+&gt; &gt; The probe function does not guarantee that chip registers are in their
+&gt; &gt; default state. Thus using reg_defaults for regmap is incorrect.
+&gt; &gt;
+&gt; &gt; For example, the chip may have already been configured by the bootloader
+&gt; &gt; before the Linux driver loads, or the mcp might not have a reset at all
+&gt; &gt; and not reset a state between reboots.
+&gt; &gt;
+&gt; &gt; In such cases, using reg_defaults leads to the cache values diverging
+&gt; &gt; from the actual registers values in the chip.
+&gt; &gt;
+&gt; &gt; Previous attempts to fix consequences of this issue were made in
+&gt; &gt; &#39;commit 3ede3f8b4b4b (&#34;pinctrl: mcp23s08: Reset all pins to input at
+&gt; &gt; probe&#34;)&#39;, but this is insufficient. The OLAT register reset is also
+&gt; &gt; required. And there&#39;s still potential for new issues arising due to cache
+&gt; &gt; desynchronization of other registers.
+&gt; &gt;
+&gt; &gt; Therefore, remove reg_defaults entirely to eliminate the root cause
+&gt; &gt; of these problems.
+&gt; &gt;
+&gt; &gt; Also remove the force reset all pins to input at probe as it is no longer
+&gt; &gt; required.
+&gt; &gt;
+&gt; &gt; Link: <a
+href="https://lore.kernel.org/all/20251006074934.27180-1-bigunclemax@gmail.com/">https://lore.kernel.org/all/20251006074934.27180-1-bigunclemax@gmail.com/</a>
+&gt; &gt; Suggested-by: Mike Looijmans &lt;mike.looijmans@topic.nl&gt;
+&gt; &gt; Signed-off-by: Maksim Kiselev &lt;bigunclemax@gmail.com&gt;
+&gt; 
+&gt; I would surely like to see some Tested-by on this patch because
+&gt; this driver has *many* users.
+&gt; 
+&gt; I added some people to the To: line who recently made changes to this
+&gt; driver, maybe they can test.
+</span>
+To add, I would suggest to look at Cypress driver, it uses the method to
+recover defaults from the actual HW state.
+
+-- 
+With Best Regards,
+Andy Shevchenko
+
+
+</pre></div></content></entry><entry><author><name>Jonathan Cameron</name><email>jic23@kernel.org</email></author><title>Re: [PATCH v13 2/2] iio: adc: max14001: New driver</title><updated>2025-10-18T19:30:47Z</updated><link
+href="https://lore.kernel.org/lkml/20251018203038.40084197@jic23-huawei/"/><id>urn:uuid:6c60c778-641f-eb46-b52d-a373754ef4d7</id><thr:in-reply-to
+ref="urn:uuid:cd482f15-04c4-b84e-10e7-5bf83eb21b01"
+href="https://lore.kernel.org/lkml/aPGlWznNdrPma4jZ@debian-BULLSEYE-live-builder-AMD64/"/><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">On Thu, 16 Oct 2025 23:09:31 -0300
+Marcelo Schmitt &lt;marcelo.schmitt1@gmail.com&gt; wrote:
+
+<span
+class="q">&gt; On 10/15, Marilene Andrade Garcia wrote:
+&gt; &gt; The MAX14001/MAX14002 is configurable, isolated 10-bit ADCs for multi-range
+&gt; &gt; binary inputs. In addition to ADC readings, the MAX14001/MAX14002 offers
+&gt; &gt; more features, like a binary comparator, a filtered reading that can
+&gt; &gt; provide the average of the last 2, 4, or 8 ADC readings, and an inrush
+&gt; &gt; comparator that triggers the inrush current. There is also a fault feature
+&gt; &gt; that can diagnose seven possible fault conditions. And an option to select
+&gt; &gt; an external or internal ADC voltage reference.
+&gt; &gt; 
+&gt; &gt; MAX14001/MAX14002 features implemented so far:
+&gt; &gt; - Raw ADC reading.
+&gt; &gt; - MV fault disable.
+&gt; &gt; - Selection of external or internal ADC voltage reference, depending on
+&gt; &gt; whether it is declared in the device tree.
+&gt; &gt; 
+&gt; &gt; Co-developed-by: Kim Seer Paller &lt;kimseer.paller@analog.com&gt;
+&gt; &gt; Signed-off-by: Kim Seer Paller &lt;kimseer.paller@analog.com&gt;
+&gt; &gt; Signed-off-by: Marilene Andrade Garcia &lt;marilene.agarcia@gmail.com&gt;
+&gt; &gt; Tested-by: Marcelo Schmitt &lt;marcelo.schmitt1@gmail.com&gt;
+&gt; &gt; ---  
+&gt; Reviewed-by: Marcelo Schmitt &lt;marcelo.schmitt1@gmail.com&gt;
+&gt; 
+&gt; Hmm, I don&#39;t know why, but I would have given a different order to the tags
+&gt; Reviewed-by: M. S. &lt;...&gt; # new tag
+&gt; Tested-by: M. S. &lt;...&gt;
+&gt; Co-developed-by: K. S. P. &lt;...&gt;
+&gt; Signed-off-by: K. S. P. &lt;...&gt;
+&gt; Signed-off-by: M. A. G. &lt;...&gt;
+&gt; 
+&gt; Swapping tag lines will probably not be a reason for a v14, though.
+</span>
+There have been many debates on this but no clear rules wrt to whether
+review / testing tags should go earlier (on basis the sign off occurs
+after them if they were on a previous version) or just put them all at the end.
+
+Meh. All the right info is here so I&#39;ll just leave it be.
+
+Series applied to the togreg branch of iio.git. Initially pushed out as
+testing to let the autobuilders play with it.
+
+Thanks,
+
+Jonathan
+
+<span
+class="q">&gt; 
+&gt; Cheers,
+&gt; Marcelo
+</span>
+</pre></div></content></entry><entry><author><name>Andy Shevchenko</name><email>andriy.shevchenko@intel.com</email></author><title>Re: [PATCH 4/4] regulator: ltm8054: Support output current limit control</title><updated>2025-10-18T19:30:20Z</updated><link
+href="https://lore.kernel.org/lkml/aPPqxsU43npNC_v0@ashevche-desk.local/"/><id>urn:uuid:488bf66e-18e1-eb92-9bbf-a115b79db089</id><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">On Thu, Sep 25, 2025 at 09:54:19AM +0200, Romain Gantois wrote:
+<span
+class="q">&gt; On Tuesday, 16 September 2025 16:27:25 CEST Romain Gantois wrote:
+&gt; &gt; On Tuesday, 16 September 2025 15:19:16 CEST Andy Shevchenko wrote:
+&gt; &gt; &gt; On Tue, Sep 16, 2025 at 12:24:09PM +0200, Romain Gantois wrote:
+</span>...
+<span
+class="q">&gt; &gt; &gt; &gt; CTL pin voltage */ +	vdac_uV = (u64)min_uA * LTM8054_MAX_CTL_V;
+&gt; &gt; &gt; &gt; +	do_div(vdac_uV, priv-&gt;max_uA);
+&gt; &gt; &gt; &gt; +
+&gt; &gt; &gt; &gt; +	dev_dbg(&#38;rdev-&gt;dev,
+&gt; &gt; &gt; &gt; +		&#34;Setting current limit to %duA, CTL pin to %duV\n&#34;, min_uA,
+&gt; &gt; &gt; &gt; (int)vdac_uV);
+&gt; &gt; &gt; 
+&gt; &gt; &gt; Why casting?
+&gt; &gt; 
+&gt; &gt; This one is indeed unnecessary.
+&gt; 
+&gt; My mistake, this cast is required to avoid a compiler warning;
+</span>
+THen provide a proper specifier instead. Casting in printf() is in 99.9% cases
+just a pure mistake.
+
+-- 
+With Best Regards,
+Andy Shevchenko
+
+
+</pre></div></content></entry><entry><author><name>Andy Shevchenko</name><email>andriy.shevchenko@linux.intel.com</email></author><title>Re: [PATCH 2/9] software node: increase the reference of the swnode by its fwnode</title><updated>2025-10-18T19:29:14Z</updated><link
+href="https://lore.kernel.org/lkml/aPPqhI7KQMnidFc5@ashevche-desk.local/"/><id>urn:uuid:32b1b455-8bc0-a09b-a595-ff6c575cbb2c</id><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">On Mon, Oct 06, 2025 at 03:00:17PM +0200, Bartosz Golaszewski wrote:
+<span
+class="q">&gt; 
+&gt; Once we allow software nodes to reference other kinds of firmware nodes,
+&gt; the node in args will no longer necessarily be a software node so bump
+&gt; its reference count using its fwnode interface.
+</span>
+Same remark, add a comment or expand a kernel doc, if exists, to cover this nuance.
+
+-- 
+With Best Regards,
+Andy Shevchenko
+
+
+</pre></div></content></entry><entry><author><name>Andy Shevchenko</name><email>andriy.shevchenko@linux.intel.com</email></author><title>Re: [PATCH 3/9] software node: allow referencing firmware nodes</title><updated>2025-10-18T19:28:32Z</updated><link
+href="https://lore.kernel.org/lkml/aPPqWTohCi-Huvfq@ashevche-desk.local/"/><id>urn:uuid:aad9f899-7380-5e6e-e509-408dbfa2bf2b</id><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">
+On Mon, Oct 06, 2025 at 03:00:18PM +0200, Bartosz Golaszewski wrote:
+<span
+class="q">&gt; From: Bartosz Golaszewski &lt;bartosz.golaszewski@linaro.org&gt;
+&gt; 
+&gt; At the moment software nodes can only reference other software nodes.
+&gt; This is a limitation for devices created, for instance, on the auxiliary
+&gt; bus with a dynamic software node attached which cannot reference devices
+&gt; the firmware node of which is &#34;real&#34; (as an OF node or otherwise).
+&gt; 
+&gt; Make it possible for a software node to reference all firmware nodes in
+&gt; addition to static software nodes. To that end: use a union of different
+&gt; pointers in struct software_node_ref_args and add an enum indicating
+&gt; what kind of reference given instance of it is. Rework the helper macros
+&gt; and deprecate the existing ones whose names don&#39;t indicate the reference
+&gt; type.
+&gt; 
+&gt; Software node graphs remain the same, as in: the remote endpoints still
+&gt; have to be software nodes.
+</span>
+...
+
+<span
+class="q">&gt; +enum software_node_ref_type {
+&gt; +	/* References a software node. */
+&gt; +	SOFTWARE_NODE_REF_SWNODE = 0,
+</span>
+
+I don&#39;t see why we need an explicit value here.
+
+<span
+class="q">&gt; +	/* References a firmware node. */
+&gt; +	SOFTWARE_NODE_REF_FWNODE,
+&gt; +};
+</span>
+...
+
+<span
+class="q">&gt;  /**
+&gt;   * struct software_node_ref_args - Reference property with additional arguments
+&gt; - * @node: Reference to a software node
+&gt; + * @swnode: Reference to a software node
+&gt; + * @fwnode: Alternative reference to a firmware node handle
+&gt;   * @nargs: Number of elements in @args array
+&gt;   * @args: Integer arguments
+&gt;   */
+&gt;  struct software_node_ref_args {
+&gt; -	const struct software_node *node;
+&gt; +	enum software_node_ref_type type;
+&gt; +	union {
+&gt; +		const struct software_node *swnode;
+&gt; +		struct fwnode_handle *fwnode;
+&gt; +	};
+</span>
+Can&#39;t we always have an fwnode reference?
+
+<span
+class="q">&gt;  	unsigned int nargs;
+&gt;  	u64 args[NR_FWNODE_REFERENCE_ARGS];
+&gt;  };
+</span>
+-- 
+With Best Regards,
+Andy Shevchenko
+
+
+</pre></div></content></entry><entry><author><name>Miguel Ojeda</name><email>miguel.ojeda.sandonis@gmail.com</email></author><title>Re: [PATCH 1/2] rust: pin-init: fix broken rust doc link</title><updated>2025-10-18T19:26:26Z</updated><link
+href="https://lore.kernel.org/lkml/CANiq72mj0L6GF-aebUcezeAD8iMV2mP-ZSn27ufKqQQiTPQajQ@mail.gmail.com/"/><id>urn:uuid:c06c361d-a3c4-7e26-b19b-148369d2b586</id><thr:in-reply-to
+ref="urn:uuid:eb2decd0-cc9e-6126-4b4a-aba70b594eea"
+href="https://lore.kernel.org/lkml/CANiq72=Qh9sJLKwACr_McnbGdu8JfzqDuv1AgCjSdwKtt-9Gdw@mail.gmail.com/"/><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">On Fri, Oct 17, 2025 at 2:58&#8239;PM Miguel Ojeda
+&lt;miguel.ojeda.sandonis@gmail.com&gt; wrote:
+<span
+class="q">&gt;
+&gt; In the end, it wasn&#39;t intentional, so Guillaume created this PR:
+&gt;
+&gt;     <a
+href="https://github.com/rust-lang/rust/pull/147809">https://github.com/rust-lang/rust/pull/147809</a>
+&gt;
+&gt; Thus 1.92 may end up without this change in behavior.
+</span>
+Indeed, it just got merged for 1.92.
+
+Cheers,
+Miguel
+</pre></div></content></entry><entry><author><name>Miguel Ojeda</name><email>miguel.ojeda.sandonis@gmail.com</email></author><title>Re: [RESEND PATCH v18 00/16] rust: replace kernel::str::CStr w/ core::ffi::CStr</title><updated>2025-10-18T19:25:05Z</updated><link
+href="https://lore.kernel.org/lkml/CANiq72n8m0JKjJMZ8Nk8B=GG5kcsSuc2YKp4=r2XJJgREoZZkw@mail.gmail.com/"/><id>urn:uuid:e407d150-7fc6-c494-08d3-bfe494d2ab9a</id><thr:in-reply-to
+ref="urn:uuid:71f0779f-d5ee-6ed1-419d-9e7e3065ac3c"
+href="https://lore.kernel.org/lkml/20251018-cstr-core-v18-0-9378a54385f8@gmail.com/"/><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">On Sat, Oct 18, 2025 at 9:16&#8239;PM Tamir Duberstein &lt;tamird@kernel.org&gt; wrote:
+<span
+class="q">&gt;
+&gt; This picks up from Michal Rostecki&#39;s work[0]. Per Michal&#39;s guidance I
+&gt; have omitted Co-authored tags, as the end result is quite different.
+&gt;
+&gt; This series is intended to be taken through rust-next. The final patch
+&gt; in the series requires some other subsystems&#39; `Acked-by`s:
+&gt; - drivers/android/binder/stats.rs: rust_binder. Alice, could you take a
+&gt;   look?
+&gt; - rust/kernel/device.rs: driver-core. Already acked by gregkh.
+&gt; - rust/kernel/firmware.rs: driver-core. Danilo, could you take a look?
+&gt; - rust/kernel/seq_file.rs: vfs. Christian, could you take a look?
+&gt; - rust/kernel/sync/*: locking-core. Boqun, could you take a look?
+&gt;
+&gt; Link: <a
+href="https://lore.kernel.org/rust-for-linux/20240819153656.28807-2-vadorovsky@protonmail.com/t/#u">https://lore.kernel.org/rust-for-linux/20240819153656.28807-2-vadorovsky@protonmail.com/t/#u</a> [0]
+&gt; Closes: <a
+href="https://github.com/Rust-for-Linux/linux/issues/1075">https://github.com/Rust-for-Linux/linux/issues/1075</a>
+&gt;
+&gt; Signed-off-by: Tamir Duberstein &lt;tamird@gmail.com&gt;
+</span>
+Thanks for trying the kernel.org account -- it seems it worked!
+
+No more throttling to deal with anymore :)
+
+Cheers,
+Miguel
+</pre></div></content></entry><entry><author><name>Andy Shevchenko</name><email>andriy.shevchenko@intel.com</email></author><title>Re: [PATCH] iio: test: fixed-point: new kunit test</title><updated>2025-10-18T19:24:55Z</updated><link
+href="https://lore.kernel.org/lkml/aPPpg9lb-UQ02m-0@ashevche-desk.local/"/><id>urn:uuid:f7bcf3af-46f9-aaa4-0f25-d5f4332f8221</id><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">
+On Mon, Oct 13, 2025 at 04:33:43PM -0500, David Lechner wrote:
+<span
+class="q">&gt; Add a kunit test for iio_str_to_fixpoint(). This function has an
+&gt; unintuitive API so this is helpful to see how to use it and shows the
+&gt; various edge cases.
+</span>
+...
+
+<span
+class="q">&gt; Discussion unrelated to the patch:
+&gt; 
+&gt; I&#39;m also a little tempted to introduce a new function that is a bit
+&gt; easier to use. Many callers of iio_str_to_fixpoint_s64() are doing
+&gt; something like int_part * 1000 + fract_part and ignoring the possibility
+&gt; of negative values which require special handling.
+&gt; 
+&gt; static int iio_str_to_fixpoint_s64(const char *str, u32 decimal_places, s64 *value)
+&gt; {
+&gt; 	int int_part, fract_part;
+&gt; 	int ret;
+&gt; 
+&gt; 	ret = iio_str_to_fixpoint(str, int_pow(10, decimal_places - 1),
+&gt; 				  &#38;int_part, &#38;fract_part);
+&gt; 	if (ret)
+&gt; 		return ret;
+&gt; 
+&gt; 	*value = (s64)int_part * int_pow(10, decimal_places) +
+&gt; 		 (int_part &lt; 0 ? -1 : 1) * fract_part;
+</span>
+
+Obviously if you go this path, the int_pow() can be called only once
+(yes, we would need a multiplication or division for the other case).
+The question is how we treat the decimal_places == 0 case.
+
+<span
+class="q">&gt; 	return 0;
+&gt; }
+</span>
+
+-- 
+With Best Regards,
+Andy Shevchenko
+
+
+</pre></div></content></entry><entry><author><name>pr-tracker-bot</name><email>pr-tracker-bot@kernel.org</email></author><title>Re: [GIT PULL] HID fixes for 6.18</title><updated>2025-10-18T19:23:54Z</updated><link
+href="https://lore.kernel.org/lkml/176081541705.3081941.4616032405563504638.pr-tracker-bot@kernel.org/"/><id>urn:uuid:f472ace8-aa5a-550e-7b9d-a6bc2672c32d</id><thr:in-reply-to
+ref="urn:uuid:f450e96a-59b2-5b8f-fe5c-e48d884f3bc5"
+href="https://lore.kernel.org/lkml/q5p7s5oo-ps69-7659-69nn-48685q1694no@xreary.bet/"/><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">The pull request you sent on Fri, 17 Oct 2025 17:38:09 +0200 (CEST):
+
+<span
+class="q">&gt; git://git.kernel.org/pub/scm/linux/kernel/git/hid/hid.git tags/hid-for-linus-2025101701
+</span>
+has been merged into torvalds/linux.git:
+<a
+href="https://git.kernel.org/torvalds/c/2953fb65481b262514ac13f24ffbc70eeace68c6">https://git.kernel.org/torvalds/c/2953fb65481b262514ac13f24ffbc70eeace68c6</a>
+
+Thank you!
+
+-- 
+Deet-doot-dot, I am a bot.
+<a
+href="https://korg.docs.kernel.org/prtracker.html">https://korg.docs.kernel.org/prtracker.html</a>
+</pre></div></content></entry><entry><author><name>pr-tracker-bot</name><email>pr-tracker-bot@kernel.org</email></author><title>Re: [GIT PULL] PCI fixes for v6.18</title><updated>2025-10-18T19:23:40Z</updated><link
+href="https://lore.kernel.org/lkml/176081540276.3081941.11954692418093019502.pr-tracker-bot@kernel.org/"/><id>urn:uuid:078fc5c0-3513-791e-0fc8-4cfa9e22c093</id><thr:in-reply-to
+ref="urn:uuid:2e23d08f-67a8-7e46-91a2-cbf20e13e19f"
+href="https://lore.kernel.org/lkml/20251017171810.GA1035665@bhelgaas/"/><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">The pull request you sent on Fri, 17 Oct 2025 12:18:10 -0500:
+
+<span
+class="q">&gt; git://git.kernel.org/pub/scm/linux/kernel/git/pci/pci.git tags/pci-v6.18-fixes-2
+</span>
+has been merged into torvalds/linux.git:
+<a
+href="https://git.kernel.org/torvalds/c/e67bb0da332c6058b29a9c46cc4035647d049a0c">https://git.kernel.org/torvalds/c/e67bb0da332c6058b29a9c46cc4035647d049a0c</a>
+
+Thank you!
+
+-- 
+Deet-doot-dot, I am a bot.
+<a
+href="https://korg.docs.kernel.org/prtracker.html">https://korg.docs.kernel.org/prtracker.html</a>
+</pre></div></content></entry><entry><author><name>pr-tracker-bot</name><email>pr-tracker-bot@kernel.org</email></author><title>Re: [GIT PULL] TPM DEVICE DRIVER: tpmdd-next-v6.18-rc2</title><updated>2025-10-18T19:23:13Z</updated><link
+href="https://lore.kernel.org/lkml/176081537600.3081941.14515189649303697967.pr-tracker-bot@kernel.org/"/><id>urn:uuid:6296423b-4980-e3a2-c67d-2d157f5a8985</id><thr:in-reply-to
+ref="urn:uuid:21559b58-92f8-bc9c-a837-a0edac17b35c"
+href="https://lore.kernel.org/lkml/aPOB9lMvnrXLf4ZD@kernel.org/"/><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">The pull request you sent on Sat, 18 Oct 2025 15:03:35 +0300:
+
+<span
+class="q">&gt; git://git.kernel.org/pub/scm/linux/kernel/git/jarkko/linux-tpmdd.git tags/tpmdd-next-v6.18-rc2
+</span>
+has been merged into torvalds/linux.git:
+<a
+href="https://git.kernel.org/torvalds/c/648937f64a09ae4a938a6793f95207d955098038">https://git.kernel.org/torvalds/c/648937f64a09ae4a938a6793f95207d955098038</a>
+
+Thank you!
+
+-- 
+Deet-doot-dot, I am a bot.
+<a
+href="https://korg.docs.kernel.org/prtracker.html">https://korg.docs.kernel.org/prtracker.html</a>
+</pre></div></content></entry><entry><author><name>pr-tracker-bot</name><email>pr-tracker-bot@kernel.org</email></author><title>Re: [GIT PULL] Compute Express Link (CXL) Fixes for 6.18-rc2</title><updated>2025-10-18T19:23:10Z</updated><link
+href="https://lore.kernel.org/lkml/176081537289.3081941.5281546598724773428.pr-tracker-bot@kernel.org/"/><id>urn:uuid:909faeea-b73c-730e-1ee9-e9a90be30990</id><thr:in-reply-to
+ref="urn:uuid:8551a97e-2e6e-4ca3-3cd3-c256b877db3d"
+href="https://lore.kernel.org/lkml/ea01d693-0d81-419c-ae20-6332feadd412@intel.com/"/><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">The pull request you sent on Fri, 17 Oct 2025 09:30:49 -0700:
+
+<span
+class="q">&gt; git://git.kernel.org/pub/scm/linux/kernel/git/cxl/cxl.git tags/cxl-fixes-6.18-rc2
+</span>
+has been merged into torvalds/linux.git:
+<a
+href="https://git.kernel.org/torvalds/c/ea0bdf2b945e91137cc465d3833aeb659ba93d79">https://git.kernel.org/torvalds/c/ea0bdf2b945e91137cc465d3833aeb659ba93d79</a>
+
+Thank you!
+
+-- 
+Deet-doot-dot, I am a bot.
+<a
+href="https://korg.docs.kernel.org/prtracker.html">https://korg.docs.kernel.org/prtracker.html</a>
+</pre></div></content></entry><entry><author><name>Jonathan Cameron</name><email>jic23@kernel.org</email></author><title>Re: [PATCH] iio: st_lsm6dsx: Fixed calibrated timestamp calculation</title><updated>2025-10-18T19:23:06Z</updated><link
+href="https://lore.kernel.org/lkml/20251018202301.2680cc79@jic23-huawei/"/><id>urn:uuid:a7c31a05-4da4-b755-62f4-4b62acc87f99</id><thr:in-reply-to
+ref="urn:uuid:d5b286ec-d4cb-6de1-8956-1615af885ce2"
+href="https://lore.kernel.org/lkml/aO_e2DEGsO-kJQFx@lore-desk/"/><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">On Wed, 15 Oct 2025 19:50:16 +0200
+Lorenzo Bianconi &lt;lorenzo@kernel.org&gt; wrote:
+
+<span
+class="q">&gt; &gt; The calibrated timestamp is calculated from the nominal value using the
+&gt; &gt; formula:
+&gt; &gt;   ts_gain[ns] &#8776; ts_sensitivity - (ts_trim_coeff * val) / 1000.
+&gt; &gt; 
+&gt; &gt; The values of ts_sensitivity and ts_trim_coeff are not the same for all
+&gt; &gt; devices, so it is necessary to differentiate them based on the part name.
+&gt; &gt; For the correct values please consult the relevant AN.
+&gt; &gt; 
+&gt; &gt; Signed-off-by: Mario Tesi &lt;mario.tesi@st.com&gt;  
+&gt; 
+&gt; Acked-by: Lorenzo Bianconi &lt;lorenzo@kernel.org&gt;
+</span>
+Fixes tag?  Just reply to this thread with one and I&#39;ll pick it up from here.
+No need for a new version.
+
+Otherwise seems fine to me.
+
+Thanks,
+
+Jonathan
+
+</pre></div></content></entry><entry><author><name>Andy Shevchenko</name><email>andriy.shevchenko@linux.intel.com</email></author><title>Re: [PATCH 1/1] i2c: designware: Disable SMBus interrupts to prevent storms from mis-configured firmware</title><updated>2025-10-18T19:22:26Z</updated><link
+href="https://lore.kernel.org/lkml/aPPo7VWm4HyoHSIE@ashevche-desk.local/"/><id>urn:uuid:de39c911-9888-578d-5126-52c701f315f9</id><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">
+On Sat, Oct 11, 2025 at 03:30:57PM +0800, Jinhui Guo wrote:
+<span
+class="q">&gt; When probing the I2C master, disable SMBus interrupts to prevent
+&gt; storms caused by broken firmware mis-configuring IC_SMBUS=1; the
+&gt; handler never services them and a mis-configured SMBUS Master
+&gt; extend-clock timeout can flood the CPU.
+</span>
+...
+
+<span
+class="q">&gt;  #define DW_IC_TX_ABRT_SOURCE			0x80
+&gt;  #define DW_IC_ENABLE_STATUS			0x9c
+&gt;  #define DW_IC_CLR_RESTART_DET			0xa8
+&gt; +#define DW_IC_SMBUS_INTR_MASK		0xcc
+</span>
+It seems one TAB too little.
+
+<span
+class="q">&gt;  #define DW_IC_COMP_PARAM_1			0xf4
+&gt;  #define DW_IC_COMP_VERSION			0xf8
+&gt;  #define DW_IC_SDA_HOLD_MIN_VERS			0x3131312A /* &#34;111*&#34; == v1.11* */
+</span>
+...
+
+The rest LGTM, but let Mika to review.
+FWIW,
+Reviewed-by: Andy Shevchenko &lt;andriy.shevchenko@linux.intel.com&gt;
+
+-- 
+With Best Regards,
+Andy Shevchenko
+
+
+</pre></div></content></entry><entry><author><name>Jonathan Cameron</name><email>jic23@kernel.org</email></author><title>Re: [PATCH v3 0/2] iio: imu: st_lsm6dsx: Decouple sensor ODR from FIFO batch data rate</title><updated>2025-10-18T19:20:04Z</updated><link
+href="https://lore.kernel.org/lkml/20251018201959.22a013f8@jic23-huawei/"/><id>urn:uuid:d7851173-36c1-f77c-44c7-794a6658d1ac</id><thr:in-reply-to
+ref="urn:uuid:61c5f426-0d0f-64e4-f4b6-feff44fd3f1b"
+href="https://lore.kernel.org/lkml/20251017164255.1251060-1-flavra@baylibre.com/"/><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">On Fri, 17 Oct 2025 18:42:53 +0200
+Francesco Lavra &lt;flavra@baylibre.com&gt; wrote:
+
+<span
+class="q">&gt; The rate at which accelerometer or gyroscope sensor samples are fed
+&gt; to the hardware FIFO (batch data rate, or BDR) does not have to
+&gt; coincide with the sensor sampling frequency (output data rate, or
+&gt; ODR); the only requirement is for the BDR to not be greater than
+&gt; the ODR. Having a BDR lower than the ODR is useful in cases where
+&gt; an application requires a high sampling rate for accurate detection
+&gt; of motion events (e.g. wakeup events), but wants to read sensor
+&gt; sample values from the device buffer at a lower data rate (e.g. to
+&gt; minimize the amount of I2C or SPI traffic and the rate of periodic
+&gt; interrupts).
+&gt; This change set amends the st_lsm6dsx IIO driver to support the above
+&gt; use case. The first commit is a trivial fix to the source code comment
+&gt; that indicates what measurement unit is used for the `odr` field of
+&gt; struct st_lsm6ds_sensor, while the second commit introduces a new
+&gt; `hwfifo_odr_mHz` field in the same struct to implement the new functionality.
+&gt; 
+</span>Applied to the togreg branch of iio.git which is initially pushed out as testing
+for the autobuilders to poke at it.
+
+Thanks
+
+Jonathan
+</pre></div></content></entry><entry><author><name>David Hunter</name><email>david.hunter.linux@gmail.com</email></author><title>Re: [PATCH] jfs: validate budmin to prevent shift-out-of-bounds in dbAllocAG()</title><updated>2025-10-18T19:20:02Z</updated><link
+href="https://lore.kernel.org/lkml/c2e85681-7ce8-43e3-ba08-63f8b854c8c7@gmail.com/"/><id>urn:uuid:1179980b-6554-c3a2-fa53-b8e99171e88f</id><thr:in-reply-to
+ref="urn:uuid:fb884c14-9656-13cb-4ee1-db3e57df131f"
+href="https://lore.kernel.org/lkml/20251018053029.226506-1-hsukrut3@gmail.com/"/><content
+type="xhtml"><div
+xmlns="http://www.w3.org/1999/xhtml"><pre
+style="white-space:pre-wrap">On 10/18/25 01:30, Sukrut Heroorkar wrote:
+<span
+class="q">&gt; Tested-by: syzbot+4b717071f1eecb2972df@syzkaller.appspotmail.com
+</span>
+
+Hey Sukrut,
+
+Did you do any other testing other than syzbot testing?
+
+Thanks,
+David Hunter
+</pre></div></content></entry></feed>
