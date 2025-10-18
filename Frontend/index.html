@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Daily News • All voices matter</title>
+  <title>LKML Database Viewer • All voices matter</title>
   <style>
     :root {
       --color-bg: #ffffff;
@@ -26,6 +26,7 @@
       color: var(--color-text);
       font-family: sans-serif;
       line-height: 1.5;
+      transition: background 0.3s ease, color 0.3s ease;
     }
     header {
       padding: 1rem 2rem;
@@ -49,13 +50,141 @@
     nav a {
       text-decoration: none;
       color: var(--color-text);
+      transition: color 0.2s;
     }
-    .toggle-theme {
+    nav a:hover {
+      color: var(--color-accent);
+    }
+    .header-actions {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+    }
+    .toggle-theme, .auth-btn {
       cursor: pointer;
       background: none;
-      border: none;
-      font-size: 1rem;
+      border: 1px solid var(--color-border);
+      padding: 0.5rem 1rem;
+      border-radius: 4px;
+      font-size: 0.9rem;
       color: var(--color-text);
+      transition: all 0.2s;
+    }
+    .toggle-theme:hover, .auth-btn:hover {
+      background: var(--color-accent);
+      color: white;
+      border-color: var(--color-accent);
+    }
+    .user-info {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .user-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--color-accent);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 0.9rem;
+    }
+    .login-modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+    }
+    .login-modal.active {
+      display: flex;
+    }
+    .login-content {
+      background: var(--color-bg);
+      padding: 2rem;
+      border-radius: 8px;
+      max-width: 400px;
+      width: 90%;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    .login-content h2 {
+      margin-top: 0;
+      color: var(--color-heading);
+    }
+    .login-content input {
+      width: 100%;
+      padding: 0.75rem;
+      margin: 0.5rem 0;
+      border: 1px solid var(--color-border);
+      border-radius: 4px;
+      background: var(--color-bg);
+      color: var(--color-text);
+      box-sizing: border-box;
+    }
+    .login-content button {
+      width: 100%;
+      padding: 0.75rem;
+      margin-top: 1rem;
+      background: var(--color-accent);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1rem;
+      transition: opacity 0.2s;
+    }
+    .login-content button:hover {
+      opacity: 0.9;
+    }
+    .close-modal {
+      float: right;
+      cursor: pointer;
+      font-size: 1.5rem;
+      color: var(--color-text);
+    }
+    .api-key-section {
+      display: none;
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      padding: 1rem;
+      margin: 1rem 0;
+      border-radius: 4px;
+    }
+    [data-theme="dark"] .api-key-section {
+      background: #4a4000;
+      border-color: #ffc107;
+    }
+    .api-key-section.active {
+      display: block;
+    }
+    .api-key-input {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+    }
+    .api-key-input input {
+      flex: 1;
+      padding: 0.5rem;
+      border: 1px solid var(--color-border);
+      border-radius: 4px;
+      background: var(--color-bg);
+      color: var(--color-text);
+    }
+    .api-key-input button {
+      padding: 0.5rem 1rem;
+      background: var(--color-accent);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
     }
     main {
       max-width: 1200px;
@@ -79,14 +208,17 @@
       border-radius: 4px;
       overflow: hidden;
       background: var(--color-bg);
-      transition: transform 0.2s ease;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      cursor: pointer;
     }
     .article:hover {
       transform: translateY(-4px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     }
     .article img {
       width: 100%;
       display: block;
+      background: var(--color-border);
     }
     .article-content {
       padding: 0.75rem 1rem 1rem;
@@ -101,6 +233,27 @@
       font-size: 1.1rem;
       color: var(--color-heading);
     }
+    .article-content .summary {
+      font-size: 0.9rem;
+      margin-top: 0.5rem;
+      color: var(--color-text);
+      opacity: 0.8;
+    }
+    .ai-badge {
+      display: inline-block;
+      background: var(--color-accent);
+      color: white;
+      font-size: 0.75rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 3px;
+      margin-top: 0.5rem;
+    }
+    .loading {
+      text-align: center;
+      padding: 2rem;
+      color: var(--color-text);
+      opacity: 0.6;
+    }
     footer {
       margin:4rem 0 2rem;
       text-align: center;
@@ -112,98 +265,67 @@
 </head>
 <body data-theme="light">
   <header>
-    <div class="site-title">Daily News</div>
+    <div class="site-title">LKML Database</div>
     <nav>
       <ul>
-        <li><a href="#">Home</a></li>
- <!--       <li><a href="#">Culture</a></li>
-        <li><a href="#">Economy</a></li>
-        <li><a href="#">Politics</a></li>
-        <li><a href="#">Science</a></li>
-        <li><a href="#">Technology</a></li>
-        <li><a href="#">Travel</a></li>
-        <li><a href="#">World</a></li>-->
+        <li><a href="#" data-section="recent">Recent Emails</a></li>
+        <li><a href="#" data-section="threads">Threads</a></li>
+        <li><a href="#" data-section="stats">Statistics</a></li>
       </ul>
     </nav>
-    <button class="toggle-theme">🌙 Dark Mode</button>
+    <div class="header-actions">
+      <button class="toggle-theme">🌙 Dark Mode</button>
+      <div id="authContainer">
+        <button class="auth-btn" id="loginBtn">🔒 Login</button>
+      </div>
+    </div>
   </header>
+
+  <div class="login-modal" id="loginModal">
+    <div class="login-content">
+      <span class="close-modal" id="closeModal">&times;</span>
+      <h2>Login to Access AI Features</h2>
+      <p>Sign in to get AI-powered summaries of kernel emails</p>
+      <input type="email" id="emailInput" placeholder="Email" />
+      <input type="password" id="passwordInput" placeholder="Password" />
+      <button id="loginSubmit">Login with Auth0</button>
+      <p style="font-size: 0.85rem; opacity: 0.7; margin-top: 1rem;">
+        Demo: Use any email/password to simulate login
+      </p>
+    </div>
+  </div>
+
   <main>
+    <div class="api-key-section" id="apiKeySection">
+      <strong>⚠️ Setup Required:</strong> Please provide your Gemini API key to enable AI summaries.
+      <a href="https://makersuite.google.com/app/apikey" target="_blank" style="color: var(--color-accent);">Get your free API key here</a>
+      <div class="api-key-input">
+        <input type="password" id="geminiKeyInput" placeholder="Paste your Gemini API key here" />
+        <button id="saveKeyBtn">Save Key</button>
+      </div>
+    </div>
+
     <section>
-      <div class="section-heading">Breaking News</div>
-      <div class="articles-grid">
-        <article class="article">
-          <img src="https://via.placeholder.com/400x250" alt="Article image">
-          <div class="article-content">
-            <div class="date">Nov 17, 2023</div>
-            <h3>Augue Neque Gravida Fermentum Sollicitudin</h3>
-          </div>
-        </article>
-        <article class="article">
-          <img src="https://via.placeholder.com/400x250" alt="Article image">
-          <div class="article-content">
-            <div class="date">Nov 14, 2023</div>
-            <h3>Congue Quisque Egestas Diam Arcu Euismod</h3>
-          </div>
-        </article>
-        <article class="article">
-          <img src="https://via.placeholder.com/400x250" alt="Article image">
-          <div class="article-content">
-            < <div class="date">Nov 15, 2023</div>
-            <h3>Convallis Posuere Morbi Leo Orna Molestie</h3>
-          </div>
-        </article>
-        <article class="article">
-          <img src="https://via.placeholder.com/400x250" alt="Article image">
-          <div class="article-content">
-            <div class="date">Nov 14, 2023</div>
-            <h3>Turpis Egestas Sed Tempus Urna Pharetra</h3>
-          </div>
-        </article>
+      <div class="section-heading">Recent Emails</div>
+      <div class="articles-grid" id="emailsGrid">
+        <div class="loading">🔒 Please login to view emails</div>
       </div>
     </section>
 
     <section>
-      <div class="section-heading">Popular News</div>
-      <div class="articles-grid">
-        <article class="article">
-          <img src="https://via.placeholder.com/400x250" alt="Article image">
-          <div class="article-content">
-            <div class="date">Nov 14, 2023</div>
-            <h3>Lacus Sedturpis Tincidunt Odaliquet Risus</h3>
-          </div>
-        </article>
-        <article class="article">
-          <img src="https://via.placeholder.com/400x250" alt="Article image">
-          <div class="article-content">
-            <div class="date">Nov 21, 2023</div>
-            <h3>Accumsan Tortor Posuere Acut Consequat Semper</h3>
-          </div>
-        </article>
-        <article class="article">
-          <img src="https://via.placeholder.com/400x250" alt="Article image">
-          <div class="article-content">
-            < <div class="date">Nov 14, 2023</div>
-            <h3>Diam Sollicitudin Tempor Eunisl Mipsum Faucibus</h3>
-          </div>
-        </article>
-        <article class="article">
-          <img src="https://via.placeholder.com/400x250" alt="Article image">
-          <div class="article-content">
-            <div class="date">Nov 21, 2023</div>
-            <h3>Bulvinar Neque Laoreet Suspendisse Interdum</h3>
-          </div>
-        </article>
+      <div class="section-heading">Top Threads</div>
+      <div class="articles-grid" id="threadsGrid">
+        <div class="loading">🔒 Please login to view threads</div>
       </div>
     </section>
-
-    <!-- You can add additional sections: Trending, Editor Choice, etc. -->
   </main>
 
   <footer>
-    © 2025 Daily News. All rights reserved.
+    © 2025 LKML Database Viewer. Linux Kernel Mailing List Archive.
   </footer>
 
   <script>
+    // Theme toggle
     const toggleBtn = document.querySelector('.toggle-theme');
     toggleBtn.addEventListener('click', () => {
       const htmlElem = document.documentElement;
@@ -212,6 +334,213 @@
       htmlElem.setAttribute('data-theme', next);
       toggleBtn.textContent = next === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode';
     });
+
+    // Auth state
+    let isAuthenticated = false;
+    let currentUser = null;
+    let geminiApiKey = null;
+    const API_BASE = 'http://localhost:8000/api';
+
+    // Modal controls
+    const loginModal = document.getElementById('loginModal');
+    const loginBtn = document.getElementById('loginBtn');
+    const closeModal = document.getElementById('closeModal');
+    const loginSubmit = document.getElementById('loginSubmit');
+    const authContainer = document.getElementById('authContainer');
+
+    loginBtn.addEventListener('click', () => {
+      loginModal.classList.add('active');
+    });
+
+    closeModal.addEventListener('click', () => {
+      loginModal.classList.remove('active');
+    });
+
+    loginModal.addEventListener('click', (e) => {
+      if (e.target === loginModal) {
+        loginModal.classList.remove('active');
+      }
+    });
+
+    // Simulate Auth0 login (replace with actual Auth0 integration)
+    loginSubmit.addEventListener('click', async () => {
+      const email = document.getElementById('emailInput').value;
+      const password = document.getElementById('passwordInput').value;
+
+      if (!email || !password) {
+        alert('Please enter email and password');
+        return;
+      }
+
+      // Simulate login
+      isAuthenticated = true;
+      currentUser = {
+        email: email,
+        name: email.split('@')[0],
+        id: 'user_' + Math.random().toString(36).substr(2, 9)
+      };
+
+      loginModal.classList.remove('active');
+      updateAuthUI();
+      loadEmails();
+      loadThreads();
+
+      // Show API key section
+      document.getElementById('apiKeySection').classList.add('active');
+    });
+
+    // Update UI after login
+    function updateAuthUI() {
+      const initials = currentUser.name.charAt(0).toUpperCase();
+      authContainer.innerHTML = `
+        <div class="user-info">
+          <div class="user-avatar">${initials}</div>
+          <span style="font-size: 0.9rem;">${currentUser.name}</span>
+          <button class="auth-btn" id="logoutBtn">Logout</button>
+        </div>
+      `;
+
+      document.getElementById('logoutBtn').addEventListener('click', logout);
+    }
+
+    // Logout
+    function logout() {
+      isAuthenticated = false;
+      currentUser = null;
+      geminiApiKey = null;
+      authContainer.innerHTML = '<button class="auth-btn" id="loginBtn">🔒 Login</button>';
+      document.getElementById('loginBtn').addEventListener('click', () => {
+        loginModal.classList.add('active');
+      });
+      document.getElementById('apiKeySection').classList.remove('active');
+      document.getElementById('emailsGrid').innerHTML = '<div class="loading">🔒 Please login to view emails</div>';
+      document.getElementById('threadsGrid').innerHTML = '<div class="loading">🔒 Please login to view threads</div>';
+    }
+
+    // Save Gemini API key
+    document.getElementById('saveKeyBtn').addEventListener('click', () => {
+      const key = document.getElementById('geminiKeyInput').value;
+      if (key.trim()) {
+        geminiApiKey = key;
+        document.getElementById('apiKeySection').classList.remove('active');
+        alert('✅ Gemini API key saved! AI summaries are now enabled.');
+        // Reload data with AI summaries
+        loadEmails();
+        loadThreads();
+      }
+    });
+
+    // Mock data - replace with actual API calls
+    const mockEmails = [
+      {
+        id: 1,
+        subject: '[PATCH] xfs: use kmalloc_array() instead of kmalloc() for map allocation',
+        from: 'Kriish Sharma',
+        date: '2025-10-18',
+        body: 'This patch improves memory allocation safety...'
+      },
+      {
+        id: 2,
+        subject: 'Re: [PATCH v2 11/11] nfsd: wire up GET_DIR_DELEGATION handling',
+        from: 'Chuck Lever',
+        date: '2025-10-18',
+        body: 'Discussion about NFS directory delegation...'
+      },
+      {
+        id: 3,
+        subject: 'Re: [resend, PATCH v2 1/1] kexec: Remove unused code',
+        from: 'Andy Shevchenko',
+        date: '2025-10-18',
+        body: 'Code cleanup in kexec subsystem...'
+      },
+      {
+        id: 4,
+        subject: 'Re: [PATCH 3/8] sparc: floppy: Replace deprecated strcpy',
+        from: 'Andy Shevchenko',
+        date: '2025-10-18',
+        body: 'Security improvement for string operations...'
+      }
+    ];
+
+    const mockThreads = [
+      {
+        id: 1,
+        subject: 'XFS memory allocation improvements',
+        emails: 3,
+        participants: 2
+      },
+      {
+        id: 2,
+        subject: 'NFS delegation handling updates',
+        emails: 11,
+        participants: 4
+      }
+    ];
+
+    // Load emails
+    async function loadEmails() {
+      if (!isAuthenticated) return;
+
+      const grid = document.getElementById('emailsGrid');
+      grid.innerHTML = '<div class="loading">Loading emails...</div>';
+
+      // Simulate API call delay
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      grid.innerHTML = mockEmails.map(email => `
+        <article class="article">
+          <div style="height: 150px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);"></div>
+          <div class="article-content">
+            <div class="date">${email.date}</div>
+            <h3>${email.subject}</h3>
+            <div style="font-size: 0.85rem; opacity: 0.7; margin-top: 0.5rem;">
+              From: ${email.from}
+            </div>
+            ${geminiApiKey ? `
+              <div class="summary">
+                🤖 AI Summary: This patch addresses memory allocation concerns and improves code safety.
+              </div>
+              <span class="ai-badge">AI Enhanced</span>
+            ` : ''}
+          </div>
+        </article>
+      `).join('');
+    }
+
+    // Load threads
+    async function loadThreads() {
+      if (!isAuthenticated) return;
+
+      const grid = document.getElementById('threadsGrid');
+      grid.innerHTML = '<div class="loading">Loading threads...</div>';
+
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      grid.innerHTML = mockThreads.map(thread => `
+        <article class="article">
+          <div style="height: 150px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);"></div>
+          <div class="article-content">
+            <h3>${thread.subject}</h3>
+            <div style="font-size: 0.85rem; opacity: 0.7; margin-top: 0.5rem;">
+              ${thread.emails} emails • ${thread.participants} participants
+            </div>
+            ${geminiApiKey ? `
+              <div class="summary">
+                🤖 Thread Summary: Discussion about improving kernel subsystem with multiple contributors providing feedback.
+              </div>
+              <span class="ai-badge">AI Enhanced</span>
+            ` : ''}
+          </div>
+        </article>
+      `).join('');
+    }
+
+    // For production, replace the login simulation with actual Auth0:
+    // 1. Include Auth0 SPA SDK: <script src="https://cdn.auth0.com/js/auth0-spa-js/2.0/auth0-spa-js.production.js"></script>
+    // 2. Initialize: const auth0 = await createAuth0Client({ domain: 'YOUR_DOMAIN', clientId: 'YOUR_CLIENT_ID' });
+    // 3. Login: await auth0.loginWithRedirect();
+    // 4. Get token: const token = await auth0.getTokenSilently();
+    // 5. Make authenticated API calls with the token
   </script>
 </body>
 </html>
