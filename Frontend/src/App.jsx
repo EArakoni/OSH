@@ -49,7 +49,12 @@ const App = () => {
   ];
 
   useEffect(() => {
-    setPosts(samplePosts);
+    // Fetch from your backend
+    fetch('http://localhost:5000/') // or your backend URL
+      .then(res => res.json())
+      .then(data => setPosts(data))
+      .catch(err => console.error('Error fetching patches:', err));
+    
     checkAuth();
   }, []);
 
