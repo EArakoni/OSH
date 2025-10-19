@@ -219,3 +219,65 @@ class EmailParser:
             'has_patch': has_patch,
             'files_changed': files_changed
         }
+
+    def parse_eml_file(self, eml_path: str) -> List[Dict]:
+        """
+        Parse a single .eml file or digest .eml file into a list of email dicts.
+        
+        Handles:
+        - Regular single emails
+        - Multipart/digest emails containing multiple sub-messages
+        """
+        print(f"📦 Loading EML file: {eml_path}")
+
+        if not Path(eml_path).exists():
+            raise FileNotFoundError(f"EML file not found: {eml_path}")
+
+        with open(eml_path, 'rb') as f:
+            raw_bytes = f.read()
+
+        msg = email.message_from_bytes(raw_bytes)
+
+        # If this is a digest (multiple emails)
+        if msg.get_content_type() == 'multipart/digest':
+            print("📦 Detected multipart/digest format")
+            sub_emails = self._extract_digest_emails(msg)
+            print(f"✅ Extracted {len(sub_emails)} sub-emails from digest")
+
+            parsed = []
+            for i, sub_msg in enumerate(sub_emails):
+                try:
+                    parsed.append(self._parse_message(sub_msg))
+                except Exception as e:
+                    print(f"  ⚠️ Failed to parse sub-email {i}: {e}")
+            return parsed
+
+        # Otherwise, single message
+        try:
+            return [self._parse_message(msg)]
+        except Exception as e:
+            print(f"⚠️ Failed to parse EML file {eml_path}: {e}")
+            return []
+
+
+    def _extract_digest_emails(self, digest_msg: email.message.Message) -> List[email.message.Message]:
+        """
+        Extract sub-emails from a multipart/digest message.
+
+        Each part in a multipart/digest is itself an email message.
+        """
+        sub_emails = []
+        for part in digest_msg.walk():
+            if part.get_content_type() == "message/rfc822":
+                try:
+                    # Each part is a full email message
+                    payload = part.get_payload()
+                    if isinstance(payload, list):
+                        # message/rfc822 parts are often a 1-element list
+                        sub_emails.extend(payload)
+                    elif isinstance(payload, email.message.Message):
+                        sub_emails.append(payload)
+                except Exception as e:
+                    print(f"⚠️ Failed to extract sub-message: {e}")
+        return sub_emails
+

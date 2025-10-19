@@ -10,12 +10,13 @@ from src.parser.pipeline import LKMLPipeline
 from src.parser.atom_parser import AtomParser
 from src.parser.thread_builder import ThreadBuilder
 from src.database.db import Database
+from src.parser.email_parser import EmailParser
 from download_lkml import download_lkml_day, download_atom_feed
 import json
+
 # Import Gemini components (with graceful fallback)
 try:
     from src.llm.gemini_client import GeminiClient
-    from src.llm.summarizer import LKMLSummarizer
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
@@ -157,6 +158,77 @@ def export_threads(db_path: str, output_file: str):
         
         print(f"✅ Exported {len(threads)} threads to {output_file}")
 
+def process_eml_file(eml_file: str, db_path: str):
+    """Process a single EML or digest EML file"""
+    print(f"🔄 Processing EML file: {eml_file}")
+    from src.parser.email_parser import LKMLEmailParser  # import here to avoid circular imports
+
+    parser = EmailParser()
+
+    # Parse the EML file
+    try:
+        emails = parser.parse_eml_file(eml_file)
+    except Exception as e:
+        print(f"❌ Failed to parse EML file: {e}")
+        return
+
+    if not emails:
+        print("⚠️ No emails found in EML file.")
+        return
+
+    print(f"📨 Parsed {len(emails)} individual email(s) from digest.")
+    db = Database(db_path)
+    email_ids = {}
+    success_count = 0
+
+    try:
+        print(f"\n📊 Inserting {len(emails)} emails into database...")
+        for idx, email in enumerate(emails, 1):
+            try:
+                email_id = db.insert_email(email)
+                if email_id:
+                    email_ids[email['message_id']] = email_id
+                    success_count += 1
+                    if idx % 10 == 0 or idx == len(emails):
+                        print(f"  ✅ {idx}/{len(emails)} stored.")
+            except Exception as e:
+                print(f"  ⚠️ Error inserting email {idx}: {e}")
+
+        print(f"✅ Successfully inserted {success_count}/{len(emails)} emails.")
+
+        # Build threads
+        print("\n🧵 Building threads...")
+        thread_builder = ThreadBuilder(emails)
+        threads = thread_builder.build_threads()
+        print(f"  Found {len(threads)} threads")
+
+        # Store threads
+        for root_id, thread_emails in threads.items():
+            try:
+                thread_meta = thread_builder.get_thread_metadata(thread_emails)
+                thread_id = db.insert_thread(thread_meta)
+                for email in thread_emails:
+                    email_db_id = email_ids.get(email['message_id'])
+                    if email_db_id:
+                        db.link_email_to_thread(thread_id, email_db_id)
+            except Exception as e:
+                print(f"  ⚠️ Error inserting thread: {e}")
+
+        print("✅ Thread building complete.")
+
+        # Stats
+        print("\n" + "="*60)
+        print("📊 Database Statistics")
+        print("="*60)
+        stats = db.get_stats()
+        for key, value in stats.items():
+            print(f"  {key.replace('_', ' ').title()}: {value:,}")
+        print("="*60)
+
+    finally:
+        db.close()
+
+
 def show_sample_emails(db_path: str, count: int = 5):
     """Show sample emails for testing"""
     with Database(db_path) as db:
@@ -243,6 +315,11 @@ Examples:
     # Export command
     export_parser = subparsers.add_parser('export', help='Export threads to JSON')
     export_parser.add_argument('output', help='Output JSON file')
+
+    # EML command
+    eml_parser = subparsers.add_parser('eml', help='Process a single EML or digest EML file')
+    eml_parser.add_argument('eml_file', help='Path to .eml file or digest')
+
     
     args = parser.parse_args()
     
@@ -253,6 +330,8 @@ Examples:
     # Execute command
     if args.command == 'atom':
         process_atom_feed(args.atom_file, args.db)
+    elif args.command == 'eml':
+        process_eml_file(args.eml_file, args.db)
     elif args.command == 'download':
         download_and_process(args.date, args.db)
     elif args.command == 'process':
