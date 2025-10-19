@@ -1,15 +1,29 @@
 {
   "summary_type": "thread",
   "subject": "[PATCH 0/4] tools: ynl: Fix tc filters with actions",
-  "tldr": "",
-  "key_points": [],
-  "discussion_summary": "",
-  "resolution": "",
-  "action_items": [],
-  "subsystems": [],
-  "key_contributors": [],
-  "importance": "medium",
-  "thread_type": "discussion",
+  "tldr": "Zahari Doychev submitted a 4-patch series to fix issues in the `ynl` library preventing correct creation of `tc` filters with actions, including memory initialization, leak fixes, and 1-based indexing support.",
+  "key_points": [
+    "A new `ynl` sample tool (`tc-filter-add`) was introduced to demonstrate adding `tc flower` filters with VLAN actions.",
+    "`struct ynl_sock` memory (specifically `tx_buf` and `rx_buf`) is now fully zero-initialized to prevent ASan-related failures.",
+    "Memory leaks in `ynl`'s handling of nested indexed arrays were fixed by ensuring proper free function calls for each entry.",
+    "The `ynl` specification was extended with a `start-index` property to support 1-based indexing required by Linux `tc` actions."
+  ],
+  "discussion_summary": "This thread introduces a four-patch series by Zahari Doychev aimed at enabling the correct creation of `tc` filters with actions using the `ynl` library. The first patch establishes a new sample tool, `tc-filter-add.c`, which demonstrates adding a `flower` filter with two VLAN push actions. This example serves as the motivating use case for the subsequent fixes and provides a concrete test scenario.\n\nThe following patches address critical issues discovered during the development or testing of this example. Patch 2 resolves a memory initialization bug in `struct ynl_sock`, ensuring that `tx_buf` and `rx_buf` are fully zero-initialized. This fix is crucial for preventing AddressSanitizer (ASan) failures caused by poisoned bytes that could appear after null terminators, leading to `tc` filter addition failures. Patch 3 tackles a memory leak, also detected by ASan, by ensuring that the appropriate nested free functions are called for each entry in indexed arrays when freeing `ynl` structures, such as `tc_act_attrs`.\n\nFinally, Patch 4 introduces a `start-index` property to the `ynl` specification for indexed arrays. This new property allows developers to specify a non-zero starting index, which is necessary to accommodate the 1-based indexing expected by Linux `tc` actions. This ensures compatibility and correct ordering of actions within `tc` filters.",
+  "resolution": "The patches were submitted to address identified bugs and improve compatibility. They are likely to be accepted and merged into the kernel.",
+  "action_items": [
+    "Review and merge the 4-patch series into the kernel."
+  ],
+  "subsystems": [
+    "netlink",
+    "tools",
+    "tc",
+    "Documentation"
+  ],
+  "key_contributors": [
+    "Zahari Doychev"
+  ],
+  "importance": "high",
+  "thread_type": "patch_review",
   "llm_model": "gemini-2.5-flash",
-  "generated_at": "2025-10-19T00:57:45.876412"
+  "generated_at": "2025-10-19T01:43:25.650792"
 }
