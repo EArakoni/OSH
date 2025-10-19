@@ -9,6 +9,8 @@ const App = () => {
   const [user, setUser] = useState(null);
   const [posts, setPosts] = useState([]);
   const [selectedPost, setSelectedPost] = useState(null);
+  const [threadDetails, setThreadDetails] = useState(null);
+  const [loadingThread, setLoadingThread] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -43,11 +45,10 @@ const App = () => {
           title: thread.subject || 'Untitled Patch',
           author: `${thread.participant_count} participants`,
           date: thread.last_post?.split('T')[0] || 'Unknown Date',
-          excerpt: thread.tldr || 'No summary available.',
+          excerpt: `Thread with ${thread.email_count} emails about ${thread.subject?.substring(0, 100)}...`,
           tags: thread.tags || [],
           subsystems: thread.subsystems || [],
-          simplified: thread.tldr || '',
-          content: thread.tldr || '',
+          simplified: thread.tldr || 'AI summary not available yet.',
           emailCount: thread.email_count || 0
         }))
         : [];
@@ -59,6 +60,30 @@ const App = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchThreadDetails = async (threadId) => {
+    setLoadingThread(true);
+    try {
+      const response = await fetch(`${API_URL}/api/threads/${threadId}`);
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch thread details`);
+      }
+
+      const data = await response.json();
+      setThreadDetails(data);
+    } catch (err) {
+      console.error('Error fetching thread details:', err);
+      setError(`Failed to load thread details: ${err.message}`);
+    } finally {
+      setLoadingThread(false);
+    }
+  };
+
+  const handleThreadClick = (post) => {
+    setSelectedPost(post);
+    fetchThreadDetails(post.id);
   };
 
   const checkAuth = () => {
@@ -209,7 +234,7 @@ const App = () => {
                     <article
                       key={post.id}
                       className="bg-white/5 backdrop-blur-md border border-purple-500/20 rounded-xl p-6 hover:bg-white/10 transition cursor-pointer group"
-                      onClick={() => setSelectedPost(post)}
+                      onClick={() => handleThreadClick(post)}
                     >
                       <h3 className="text-xl font-semibold text-white mb-2 group-hover:text-purple-300 transition line-clamp-2">
                         {post.title}
@@ -264,45 +289,84 @@ const App = () => {
         ) : (
           <div className="max-w-4xl mx-auto">
             <button
-              onClick={() => setSelectedPost(null)}
+              onClick={() => {
+                setSelectedPost(null);
+                setThreadDetails(null);
+              }}
               className="mb-6 text-purple-300 hover:text-purple-200 transition flex items-center space-x-2"
             >
               <span>←</span><span>Back to all patches</span>
             </button>
-            <article className="bg-white/5 backdrop-blur-md border border-purple-500/20 rounded-xl p-8">
-              <h1 className="text-4xl font-bold text-white mb-4">{selectedPost.title}</h1>
-              <div className="flex items-center space-x-3 text-gray-400 mb-6">
-                <User className="w-4 h-4" />
-                <span>{selectedPost.author}</span>
-                <span>•</span>
-                <span>{selectedPost.date}</span>
-                <span>•</span>
-                <span>{selectedPost.emailCount} emails in thread</span>
+
+            {loadingThread ? (
+              <div className="text-center py-12">
+                <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500"></div>
+                <p className="text-gray-300 mt-4">Loading thread details...</p>
               </div>
-              <div className="flex flex-wrap gap-2 mb-6">
-                {selectedPost.tags.map(tag => (
-                  <span key={tag} className="px-3 py-1 bg-purple-500/20 text-purple-300 rounded-full text-sm">
-                    {tag}
-                  </span>
-                ))}
-                {selectedPost.subsystems.map(sub => (
-                  <span key={sub} className="px-3 py-1 bg-blue-500/20 text-blue-300 rounded-full text-sm">
-                    {sub}
-                  </span>
-                ))}
-              </div>
-              {isAuthenticated && (
-                <div className="bg-gradient-to-r from-green-500/10 to-blue-500/10 border border-green-500/30 rounded-xl p-6 mb-6">
-                  <h3 className="text-lg font-semibold text-green-300 mb-3 flex items-center">
-                    <Unlock className="w-5 h-5 mr-2" /> AI-Simplified Explanation
-                  </h3>
-                  <p className="text-gray-200 text-lg leading-relaxed">{selectedPost.simplified}</p>
+            ) : (
+              <article className="bg-white/5 backdrop-blur-md border border-purple-500/20 rounded-xl p-8">
+                <h1 className="text-4xl font-bold text-white mb-4">{selectedPost.title}</h1>
+                <div className="flex items-center space-x-3 text-gray-400 mb-6">
+                  <User className="w-4 h-4" />
+                  <span>{selectedPost.author}</span>
+                  <span>•</span>
+                  <span>{selectedPost.date}</span>
+                  <span>•</span>
+                  <span>{selectedPost.emailCount} emails in thread</span>
                 </div>
-              )}
-              <div className="prose prose-invert max-w-none">
-                <p className="text-gray-300 leading-relaxed text-lg">{selectedPost.content}</p>
-              </div>
-            </article>
+                <div className="flex flex-wrap gap-2 mb-6">
+                  {selectedPost.tags.map(tag => (
+                    <span key={tag} className="px-3 py-1 bg-purple-500/20 text-purple-300 rounded-full text-sm">
+                      {tag}
+                    </span>
+                  ))}
+                  {selectedPost.subsystems.map(sub => (
+                    <span key={sub} className="px-3 py-1 bg-blue-500/20 text-blue-300 rounded-full text-sm">
+                      {sub}
+                    </span>
+                  ))}
+                </div>
+
+                {/* AI Summary - Only shown when authenticated */}
+                {isAuthenticated && selectedPost.simplified && (
+                  <div className="bg-gradient-to-r from-green-500/10 to-blue-500/10 border border-green-500/30 rounded-xl p-6 mb-6">
+                    <h3 className="text-lg font-semibold text-green-300 mb-3 flex items-center">
+                      <Unlock className="w-5 h-5 mr-2" /> AI-Simplified Explanation
+                    </h3>
+                    <p className="text-gray-200 text-lg leading-relaxed">{selectedPost.simplified}</p>
+                  </div>
+                )}
+
+                {/* Thread Emails - Simple text display */}
+                <div className="mt-8">
+                  <h3 className="text-2xl font-bold text-white mb-6">Email Thread</h3>
+
+                  {threadDetails && threadDetails.emails ? (
+                    <div className="space-y-6">
+                      {threadDetails.emails.map((email, index) => (
+                        <div key={email.id} className="bg-white/5 border border-purple-500/20 rounded-lg p-6">
+                          <div className="flex items-start justify-between mb-4">
+                            <div>
+                              <p className="text-purple-300 font-semibold">{email.from_address}</p>
+                              <p className="text-gray-400 text-sm mt-1">{email.date}</p>
+                            </div>
+                            <span className="text-gray-500 text-sm">#{index + 1}</span>
+                          </div>
+
+                          <h4 className="text-white font-medium mb-3">{email.subject}</h4>
+
+                          <pre className="text-gray-300 text-sm whitespace-pre-wrap font-mono bg-black/30 p-4 rounded overflow-x-auto">
+                            {email.body}
+                          </pre>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-gray-400">No email details available.</p>
+                  )}
+                </div>
+              </article>
+            )}
           </div>
         )}
       </main>
