@@ -17,10 +17,11 @@ import json
 # Import Gemini components (with graceful fallback)
 try:
     from src.llm.gemini_client import GeminiClient
+    from src.llm.summarizer import LKMLSummarizer
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
-    print("⚠️  Gemini summarization not available. Install: pip install google-generativeai")
+    print("⚠️  Gemini summarization not available. Install: pip install google-generativeai tenacity")
 
 def download_and_process(date: str, db_path: str):
     """Download and process LKML for a specific date"""
@@ -161,22 +162,24 @@ def export_threads(db_path: str, output_file: str):
 def process_eml_file(eml_file: str, db_path: str):
     """Process a single EML or digest EML file"""
     print(f"🔄 Processing EML file: {eml_file}")
-    from src.parser.email_parser import LKMLEmailParser  # import here to avoid circular imports
-
+    
     parser = EmailParser()
 
-    # Parse the EML file
+    # Parse the EML file (handles both single and digest)
     try:
         emails = parser.parse_eml_file(eml_file)
     except Exception as e:
         print(f"❌ Failed to parse EML file: {e}")
+        import traceback
+        traceback.print_exc()
         return
 
     if not emails:
         print("⚠️ No emails found in EML file.")
         return
 
-    print(f"📨 Parsed {len(emails)} individual email(s) from digest.")
+    print(f"📨 Parsed {len(emails)} individual email(s) from file.")
+    
     db = Database(db_path)
     email_ids = {}
     success_count = 0
@@ -252,32 +255,184 @@ def show_sample_emails(db_path: str, count: int = 5):
             print(f"Body: {row[3]}...")
             print("-" * 60)
 
+# ============================================================================
+# GEMINI COMMANDS
+# ============================================================================
+
+def summarize_threads(db_path: str, limit: int = None, min_emails: int = 2, 
+                     force: bool = False, model: str = 'flash'):
+    """Summarize threads using Gemini"""
+    if not GEMINI_AVAILABLE:
+        print("❌ Gemini not available. Install: pip install google-generativeai tenacity")
+        return
+    
+    db = Database(db_path)
+    client = GeminiClient(model=model)
+    summarizer = LKMLSummarizer(db, client)
+    
+    try:
+        stats = summarizer.summarize_all_threads(
+            limit=limit,
+            min_emails=min_emails,
+            skip_errors=True
+        )
+        
+        print(f"\n📊 Summarization complete!")
+        print(f"   Success: {stats['success']}")
+        print(f"   Errors: {stats['errors']}")
+        
+        client.print_metrics()
+        summarizer.print_summary_stats()
+        
+    finally:
+        db.close()
+
+def show_thread_summary(db_path: str, thread_id: int):
+    """Show summary for a specific thread"""
+    db = Database(db_path)
+    
+    try:
+        cursor = db.conn.cursor()
+        
+        # Get thread info
+        cursor.execute("SELECT * FROM threads WHERE id = ?", (thread_id,))
+        thread = cursor.fetchone()
+        
+        if not thread:
+            print(f"❌ Thread {thread_id} not found")
+            return
+        
+        thread_dict = dict(thread)
+        
+        # Get summary
+        cursor.execute("""
+            SELECT * FROM summaries 
+            WHERE thread_id = ? AND summary_type = 'thread'
+            ORDER BY generated_at DESC
+            LIMIT 1
+        """, (thread_id,))
+        
+        summary = cursor.fetchone()
+        
+        print("\n" + "="*60)
+        print(f"Thread {thread_id}: {thread_dict['subject']}")
+        print("="*60)
+        print(f"Emails: {thread_dict['email_count']}")
+        print(f"Participants: {thread_dict['participant_count']}")
+        print(f"Date range: {thread_dict['first_post']} → {thread_dict['last_post']}")
+        
+        if summary:
+            summary_dict = dict(summary)
+            print("\n📝 SUMMARY:")
+            print(f"   TL;DR: {summary_dict['tldr']}")
+            
+            if summary_dict.get('key_points'):
+                key_points = json.loads(summary_dict['key_points'])
+                print("\n   Key Points:")
+                for point in key_points:
+                    print(f"     • {point}")
+            
+            if summary_dict.get('mentioned_subsystems'):
+                subsystems = json.loads(summary_dict['mentioned_subsystems'])
+                print(f"\n   Subsystems: {', '.join(subsystems)}")
+            
+            print(f"\n   Generated: {summary_dict['generated_at']}")
+            print(f"   Model: {summary_dict['llm_model']}")
+        else:
+            print("\n⚠️  No summary available")
+            print("   Run: python main.py summarize --limit 1")
+        
+        print("="*60)
+        
+    finally:
+        db.close()
+
+def generate_digest(db_path: str, date: str, force: bool = False, model: str = 'flash'):
+    """Generate daily digest"""
+    if not GEMINI_AVAILABLE:
+        print("❌ Gemini not available. Install: pip install google-generativeai tenacity")
+        return
+    
+    db = Database(db_path)
+    client = GeminiClient(model=model)
+    summarizer = LKMLSummarizer(db, client)
+    
+    try:
+        digest = summarizer.generate_daily_digest(date, force=force)
+        
+        if digest and not digest.get('error'):
+            print("\n" + "="*60)
+            print(f"📅 Daily Digest - {date}")
+            print("="*60)
+            print(f"\n{digest['tldr']}\n")
+            
+            if digest.get('highlights'):
+                print("🌟 Highlights:")
+                for highlight in digest['highlights']:
+                    print(f"  • {highlight}")
+            
+            if digest.get('critical_items'):
+                print("\n🚨 Critical Items:")
+                for item in digest['critical_items']:
+                    print(f"  • {item}")
+            
+            print("\n" + "="*60)
+            
+            client.print_metrics()
+        else:
+            print(f"❌ Failed to generate digest")
+        
+    finally:
+        db.close()
+
+def list_summaries(db_path: str, limit: int = 10):
+    """List recent summaries"""
+    if not GEMINI_AVAILABLE:
+        print("❌ Gemini not available")
+        return
+    
+    db = Database(db_path)
+    summarizer = LKMLSummarizer(db, GeminiClient())
+    
+    try:
+        summaries = summarizer.get_recent_summaries(limit=limit)
+        
+        print("\n" + "="*60)
+        print(f"📋 Recent Summaries (last {limit})")
+        print("="*60)
+        
+        for summary in summaries:
+            print(f"\nThread: {summary.get('subject', 'N/A')}")
+            print(f"TL;DR: {summary['tldr']}")
+            print(f"Type: {summary['summary_type']} | Generated: {summary['generated_at']}")
+            print("-" * 60)
+        
+        summarizer.print_summary_stats()
+        
+    finally:
+        db.close()
+
 def main():
     parser = argparse.ArgumentParser(
         description="LKML Dashboard - Linux Kernel Mailing List Parser and Analyzer",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Process an Atom feed (recommended for testing)
+  # Data ingestion
   python main.py atom new.atom
-  
-  # Download and process a specific day (mbox format)
+  python main.py eml digest.eml
   python main.py download 2024-10-15
   
-  # Process an existing mbox file
-  python main.py process lkml-2024-10-18.mbox
-  
-  # Show database statistics
+  # Database queries
   python main.py stats
-  
-  # Show sample emails
-  python main.py sample
-  
-  # Search emails
+  python main.py sample -n 10
   python main.py search "memory leak"
   
-  # Export threads to JSON
-  python main.py export threads.json
+  # Gemini summarization
+  python main.py summarize --limit 5
+  python main.py show-summary --thread 1
+  python main.py digest --date 2025-10-18
+  python main.py list-summaries
         """
     )
     
@@ -289,7 +444,7 @@ Examples:
     
     subparsers = parser.add_subparsers(dest='command', help='Commands')
     
-    # Atom command (NEW!)
+    # Atom command
     atom_parser = subparsers.add_parser('atom', help='Process an Atom feed file')
     atom_parser.add_argument('atom_file', help='Path to Atom XML file')
     
@@ -304,7 +459,7 @@ Examples:
     # Stats command
     subparsers.add_parser('stats', help='Show database statistics')
     
-    # Sample command (NEW!)
+    # Sample command
     sample_parser = subparsers.add_parser('sample', help='Show sample emails')
     sample_parser.add_argument('-n', '--count', type=int, default=5, help='Number of emails to show')
     
@@ -319,6 +474,28 @@ Examples:
     # EML command
     eml_parser = subparsers.add_parser('eml', help='Process a single EML or digest EML file')
     eml_parser.add_argument('eml_file', help='Path to .eml file or digest')
+    
+    # Summarize command
+    summarize_parser = subparsers.add_parser('summarize', help='Summarize threads with Gemini')
+    summarize_parser.add_argument('--limit', type=int, help='Max threads to summarize')
+    summarize_parser.add_argument('--min-emails', type=int, default=2, help='Min emails per thread')
+    summarize_parser.add_argument('--force', action='store_true', help='Regenerate existing summaries')
+    summarize_parser.add_argument('--model', default='flash', choices=['flash', 'flash-8b', 'pro'], 
+                                 help='Gemini model to use')
+    
+    # Show summary command
+    show_summary_parser = subparsers.add_parser('show-summary', help='Show summary for a thread')
+    show_summary_parser.add_argument('--thread', type=int, required=True, help='Thread ID')
+    
+    # Digest command
+    digest_parser = subparsers.add_parser('digest', help='Generate daily digest')
+    digest_parser.add_argument('--date', required=True, help='Date (YYYY-MM-DD)')
+    digest_parser.add_argument('--force', action='store_true', help='Regenerate if exists')
+    digest_parser.add_argument('--model', default='flash', choices=['flash', 'flash-8b', 'pro'])
+    
+    # List summaries command
+    list_summaries_parser = subparsers.add_parser('list-summaries', help='List recent summaries')
+    list_summaries_parser.add_argument('--limit', type=int, default=10, help='Number to show')
 
     
     args = parser.parse_args()
@@ -344,6 +521,14 @@ Examples:
         search_emails(args.query, args.db)
     elif args.command == 'export':
         export_threads(args.db, args.output)
+    elif args.command == 'summarize':
+        summarize_threads(args.db, args.limit, args.min_emails, args.force, args.model)
+    elif args.command == 'show-summary':
+        show_thread_summary(args.db, args.thread)
+    elif args.command == 'digest':
+        generate_digest(args.db, args.date, args.force, args.model)
+    elif args.command == 'list-summaries':
+        list_summaries(args.db, args.limit)
 
 if __name__ == "__main__":
     main()

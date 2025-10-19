@@ -1,36 +1,55 @@
 """
 Google Gemini API client for LKML email summarization
+Improved version with rate limiting, retry logic, caching, and better error handling
 """
 
 import os
 import json
 import time
+import hashlib
 from typing import Dict, List, Optional, Any
 from datetime import datetime
+from pathlib import Path
 import google.generativeai as genai
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 class GeminiClient:
     """Client for interacting with Google Gemini API"""
     
-    # Model configurations
+    # Model configurations (updated to stable versions)
     MODELS = {
-        'flash': 'models/gemini-2.5-flash-preview-05-20',
-        'pro': 'models/gemini-2.5-pro-preview-03-25'
+        'flash': 'gemini-2.5-flash',           # Fast, cheap, good for most tasks
+        'flash-8b': 'gemini-2.5-flash-8b',     # Even faster, cheaper
+        'pro': 'gemini-2.5-pro',               # Slower, better quality
+        'flash-exp': 'gemini-2.5-flash-exp'    # Experimental 2.0 (if available)
     }
     
     # Token limits (leave buffer for response)
     TOKEN_LIMITS = {
-        'flash': 900000,  # 1M limit, use 900k for safety
-        'pro': 1900000    # 2M limit, use 1.9M for safety
+        'flash': 900000,      # 1M limit, use 900k for safety
+        'flash-8b': 900000,   # 1M limit
+        'pro': 1900000,       # 2M limit, use 1.9M for safety
+        'flash-exp': 900000   # 1M limit
     }
     
-    def __init__(self, api_key: Optional[str] = None, model: str = 'flash'):
+    # Rate limiting (requests per minute)
+    RATE_LIMITS = {
+        'flash': 15,          # 15 requests per minute (free tier)
+        'flash-8b': 15,
+        'pro': 2,             # Conservative for pro
+        'flash-exp': 15
+    }
+    
+    def __init__(self, api_key: Optional[str] = None, model: str = 'flash', 
+                 enable_cache: bool = True, cache_dir: str = 'cache/gemini'):
         """
         Initialize Gemini client
         
         Args:
             api_key: Google AI API key (or set GEMINI_API_KEY env var)
-            model: 'flash' or 'pro'
+            model: 'flash', 'flash-8b', 'pro', or 'flash-exp'
+            enable_cache: Enable response caching to save API calls
+            cache_dir: Directory to store cached responses
         """
         self.api_key = api_key or os.getenv('GEMINI_API_KEY')
         if not self.api_key:
@@ -41,6 +60,7 @@ class GeminiClient:
         
         genai.configure(api_key=self.api_key)
         
+        self.model_type = model
         self.model_name = self.MODELS.get(model, self.MODELS['flash'])
         self.model = genai.GenerativeModel(self.model_name)
         
@@ -49,10 +69,151 @@ class GeminiClient:
             'temperature': 0.3,  # Lower for factual summaries
             'top_p': 0.95,
             'top_k': 40,
-            'max_output_tokens': 2048,
+            'max_output_tokens': 8192,
         }
         
-        print(f"✅ Gemini client initialized with model: {self.model_name}")
+        # Safety settings - disable for technical/code content
+        self.safety_settings = [
+            {
+                "category": "HARM_CATEGORY_HARASSMENT",
+                "threshold": "BLOCK_NONE"
+            },
+            {
+                "category": "HARM_CATEGORY_HATE_SPEECH",
+                "threshold": "BLOCK_NONE"
+            },
+            {
+                "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                "threshold": "BLOCK_NONE"
+            },
+            {
+                "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                "threshold": "BLOCK_NONE"
+            },
+        ]
+        
+        # Rate limiting
+        self.last_request_time = 0
+        self.request_count = 0
+        self.request_window_start = time.time()
+        self.rate_limit = self.RATE_LIMITS.get(model, 15)
+        
+        # Caching
+        self.enable_cache = enable_cache
+        self.cache_dir = Path(cache_dir)
+        if enable_cache:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Metrics
+        self.metrics = {
+            'api_calls': 0,
+            'cache_hits': 0,
+            'errors': 0,
+            'total_tokens_estimate': 0
+        }
+        
+        print(f"✅ Gemini client initialized")
+        print(f"   Model: {self.model_name}")
+        print(f"   Cache: {'enabled' if enable_cache else 'disabled'}")
+        print(f"   Rate limit: {self.rate_limit} requests/minute")
+    
+    def _rate_limit(self):
+        """Ensure we don't exceed rate limits"""
+        current_time = time.time()
+        
+        # Reset counter if we're in a new minute window
+        if current_time - self.request_window_start >= 60:
+            self.request_count = 0
+            self.request_window_start = current_time
+        
+        # If we've hit the rate limit, wait
+        if self.request_count >= self.rate_limit:
+            wait_time = 60 - (current_time - self.request_window_start)
+            if wait_time > 0:
+                print(f"⏳ Rate limit reached, waiting {wait_time:.1f}s...")
+                time.sleep(wait_time)
+                self.request_count = 0
+                self.request_window_start = time.time()
+        
+        self.request_count += 1
+    
+    def _get_cache_key(self, content: str, summary_type: str) -> str:
+        """Generate cache key from content"""
+        hash_input = f"{summary_type}:{content}:{self.model_name}"
+        return hashlib.md5(hash_input.encode()).hexdigest()
+    
+    def _get_from_cache(self, cache_key: str) -> Optional[Dict]:
+        """Retrieve from cache if available"""
+        if not self.enable_cache:
+            return None
+        
+        cache_file = self.cache_dir / f"{cache_key}.json"
+        if cache_file.exists():
+            try:
+                with open(cache_file, 'r') as f:
+                    self.metrics['cache_hits'] += 1
+                    return json.load(f)
+            except Exception as e:
+                print(f"⚠️  Cache read error: {e}")
+                return None
+        return None
+    
+    def _save_to_cache(self, cache_key: str, data: Dict):
+        """Save response to cache"""
+        if not self.enable_cache:
+            return
+        
+        cache_file = self.cache_dir / f"{cache_key}.json"
+        try:
+            with open(cache_file, 'w') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            print(f"⚠️  Cache write error: {e}")
+    
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((
+            ConnectionError,
+            TimeoutError,
+            Exception  # Gemini API errors
+        ))
+    )
+    def _generate_content_with_retry(self, prompt: str) -> Any:
+        """
+        Generate content with automatic retry on failures
+        
+        Uses exponential backoff: 2s, 4s, 8s between retries
+        """
+        self._rate_limit()
+        self.metrics['api_calls'] += 1
+        
+        try:
+            response = self.model.generate_content(
+                prompt,
+                generation_config=self.generation_config
+            )
+            
+            # Estimate token usage (rough: 4 chars per token)
+            estimated_tokens = (len(prompt) + len(response.text)) // 4
+            self.metrics['total_tokens_estimate'] += estimated_tokens
+            
+            return response
+            
+        except Exception as e:
+            self.metrics['errors'] += 1
+            error_str = str(e).lower()
+            
+            # Classify error types
+            if 'quota' in error_str or 'rate limit' in error_str:
+                print(f"⚠️  API quota/rate limit exceeded")
+                raise
+            elif 'safety' in error_str or 'blocked' in error_str:
+                print(f"⚠️  Content blocked by safety filters")
+                raise
+            else:
+                print(f"⚠️  API error: {e}")
+                raise
     
     @staticmethod
     def list_available_models():
@@ -65,7 +226,7 @@ class GeminiClient:
                     print(f"  - {model.name}")
             return [m.name for m in models]
         except Exception as e:
-            print(f"Error listing models: {e}")
+            print(f"❌ Error listing models: {e}")
             return []
     
     def summarize_email(self, email: Dict[str, Any]) -> Dict[str, Any]:
@@ -78,28 +239,41 @@ class GeminiClient:
         Returns:
             Dictionary with summary data
         """
+        # Check cache first
+        cache_key = self._get_cache_key(
+            email.get('body', '') + email.get('subject', ''),
+            'email'
+        )
+        cached = self._get_from_cache(cache_key)
+        if cached:
+            return cached
+        
         prompt = self._build_email_prompt(email)
         
         try:
-            response = self.model.generate_content(
-                prompt,
-                generation_config=self.generation_config
-            )
+            response = self._generate_content_with_retry(prompt)
             
             # Parse JSON response
             summary_data = self._parse_json_response(response.text)
             
-            return {
+            result = {
                 'email_id': email.get('message_id'),
                 'summary_type': 'email',
                 'tldr': summary_data.get('tldr', ''),
                 'key_points': summary_data.get('key_points', []),
                 'email_type': summary_data.get('email_type', 'discussion'),
+                'patch_version': summary_data.get('patch_version'),
                 'subsystems': summary_data.get('subsystems', []),
                 'importance': summary_data.get('importance', 'medium'),
+                'is_security_related': summary_data.get('is_security_related', False),
                 'llm_model': self.model_name,
                 'generated_at': datetime.utcnow().isoformat()
             }
+            
+            # Cache the result
+            self._save_to_cache(cache_key, result)
+            
+            return result
             
         except Exception as e:
             print(f"❌ Error summarizing email: {e}")
@@ -117,25 +291,24 @@ class GeminiClient:
         Returns:
             Dictionary with thread summary
         """
-        # Check if thread is too large
-        estimated_tokens = sum(len(e.get('body', '')) for e in thread_emails) // 4
+        # Check cache
+        thread_key = ''.join([e.get('message_id', '') for e in thread_emails])
+        cache_key = self._get_cache_key(thread_key, 'thread')
+        cached = self._get_from_cache(cache_key)
+        if cached:
+            return cached
         
-        if estimated_tokens > self.TOKEN_LIMITS[self.model_name.split('-')[-1]]:
-            # Truncate thread - keep first 3 and last 3 emails
-            if len(thread_emails) > 6:
-                thread_emails = thread_emails[:3] + thread_emails[-3:]
+        # Smart truncation to fit token limits
+        thread_emails = self._smart_truncate_thread(thread_emails)
         
         prompt = self._build_thread_prompt(thread_emails, thread_meta)
         
         try:
-            response = self.model.generate_content(
-                prompt,
-                generation_config=self.generation_config
-            )
+            response = self._generate_content_with_retry(prompt)
             
             summary_data = self._parse_json_response(response.text)
             
-            return {
+            result = {
                 'summary_type': 'thread',
                 'subject': thread_meta.get('subject'),
                 'tldr': summary_data.get('tldr', ''),
@@ -146,9 +319,15 @@ class GeminiClient:
                 'subsystems': summary_data.get('subsystems', []),
                 'key_contributors': summary_data.get('key_contributors', []),
                 'importance': summary_data.get('importance', 'medium'),
+                'thread_type': summary_data.get('thread_type', 'discussion'),
                 'llm_model': self.model_name,
                 'generated_at': datetime.utcnow().isoformat()
             }
+            
+            # Cache the result
+            self._save_to_cache(cache_key, result)
+            
+            return result
             
         except Exception as e:
             print(f"❌ Error summarizing thread: {e}")
@@ -166,17 +345,20 @@ class GeminiClient:
         Returns:
             Dictionary with daily digest
         """
+        # Check cache
+        cache_key = self._get_cache_key(f"{date}:{len(threads_data)}", 'digest')
+        cached = self._get_from_cache(cache_key)
+        if cached:
+            return cached
+        
         prompt = self._build_digest_prompt(threads_data, date)
         
         try:
-            response = self.model.generate_content(
-                prompt,
-                generation_config=self.generation_config
-            )
+            response = self._generate_content_with_retry(prompt)
             
             digest_data = self._parse_json_response(response.text)
             
-            return {
+            result = {
                 'summary_type': 'daily',
                 'date': date,
                 'tldr': digest_data.get('tldr', ''),
@@ -189,17 +371,66 @@ class GeminiClient:
                 'generated_at': datetime.utcnow().isoformat()
             }
             
+            # Cache the result
+            self._save_to_cache(cache_key, result)
+            
+            return result
+            
         except Exception as e:
             print(f"❌ Error generating digest: {e}")
             return self._error_summary('daily', str(e))
     
+    def _smart_truncate_thread(self, thread_emails: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Intelligently truncate thread to fit token limits
+        Keep: root email, patches, important replies, and latest emails
+        """
+        if len(thread_emails) <= 10:
+            return thread_emails
+        
+        # Always keep root (first email)
+        keep = [thread_emails[0]]
+        
+        # Add emails with patches (identified by subject)
+        patch_emails = []
+        for email in thread_emails[1:-3]:
+            subject = email.get('subject', '').upper()
+            if '[PATCH' in subject or '[RFC' in subject:
+                patch_emails.append(email)
+        
+        # Keep up to 3 patch emails
+        keep.extend(patch_emails[:3])
+        
+        # Always keep last 3 emails
+        keep.extend(thread_emails[-3:])
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        result = []
+        for email in keep:
+            msg_id = email.get('message_id')
+            if msg_id not in seen:
+                seen.add(msg_id)
+                result.append(email)
+        
+        print(f"  📉 Truncated thread from {len(thread_emails)} to {len(result)} emails")
+        return result
+    
     def _build_email_prompt(self, email: Dict[str, Any]) -> str:
-        """Build prompt for email summarization"""
+        """Build LKML-specific prompt for email summarization"""
         subject = email.get('subject', 'No subject')
         sender = email.get('from', 'Unknown')
         body = email.get('body', '')[:5000]  # Limit body length
         
-        return f"""Analyze this Linux Kernel Mailing List (LKML) email and provide a structured summary.
+        return f"""You are analyzing a Linux Kernel Mailing List (LKML) email.
+
+CONTEXT: LKML is where Linux kernel developers discuss patches, bugs, and features.
+Common patterns:
+- [PATCH] = code change proposal
+- [RFC] = request for comments (early discussion)
+- [v2], [v3], etc. = patch revision number
+- Subsystem tags: [net], [mm], [fs], [drivers], etc.
+- Security-related emails often have CVE numbers or mention "security", "vulnerability"
 
 EMAIL DETAILS:
 Subject: {subject}
@@ -208,27 +439,24 @@ From: {sender}
 BODY:
 {body}
 
-TASK: Provide a JSON response with the following structure:
+TASK: Provide JSON with this EXACT structure:
 {{
     "tldr": "One sentence summary (max 150 chars)",
-    "email_type": "patch|rfc|bug|discussion|announcement",
-    "key_points": ["point 1", "point 2", "point 3"],
-    "subsystems": ["subsystem names mentioned, e.g., networking, fs, mm"],
+    "email_type": "patch|rfc|bug|discussion|announcement|security",
+    "patch_version": "v2" or null (extract from subject like [PATCH v2]),
+    "subsystems": ["networking", "memory-management"],  # From subject tags or content
     "importance": "critical|high|medium|low",
-    "technical_details": {{
-        "files_modified": ["list if patch"],
-        "bug_severity": "critical|high|medium|low if bug report",
-        "proposed_changes": "brief description if patch/RFC"
-    }}
+    "is_security_related": true|false,
+    "key_points": ["point 1", "point 2", "point 3"]
 }}
 
-GUIDELINES:
-- Be concise and technical
-- Extract kernel subsystems from subject tags and content
-- Classify importance based on: security issues, major features, widespread impact
-- For patches: identify what's being changed and why
-- For bugs: identify severity and affected components
-- Return ONLY valid JSON, no markdown formatting"""
+IMPORTANCE GUIDE:
+- critical: security issues, kernel panics, data corruption
+- high: major features, widespread bugs, API changes
+- medium: normal patches, improvements
+- low: typo fixes, minor cleanups
+
+Return ONLY valid JSON. No markdown, no code blocks, no explanations."""
     
     def _build_thread_prompt(self, thread_emails: List[Dict[str, Any]], 
                             thread_meta: Dict[str, Any]) -> str:
@@ -253,7 +481,7 @@ EMAILS IN THREAD: {email_count}
 CONVERSATION:
 {thread_text}
 
-TASK: Provide a JSON response with the following structure:
+TASK: Provide JSON with this EXACT structure:
 {{
     "tldr": "One sentence summary of entire thread (max 200 chars)",
     "discussion_summary": "2-3 paragraph narrative of the discussion",
@@ -263,7 +491,7 @@ TASK: Provide a JSON response with the following structure:
     "subsystems": ["affected kernel subsystems"],
     "key_contributors": ["names of main participants"],
     "importance": "critical|high|medium|low",
-    "thread_type": "patch_review|bug_fix|feature_discussion|rfc|bikeshedding"
+    "thread_type": "patch_review|bug_fix|feature_discussion|rfc|security|bikeshedding"
 }}
 
 GUIDELINES:
@@ -294,7 +522,7 @@ GUIDELINES:
 THREADS TODAY ({len(threads_data)} total):
 {threads_text}
 
-TASK: Provide a JSON response with the following structure:
+TASK: Provide JSON with this EXACT structure:
 {{
     "tldr": "Executive summary of the day's activity (2-3 sentences)",
     "highlights": [
@@ -345,7 +573,7 @@ GUIDELINES:
         return {
             'summary_type': summary_type,
             'error': error,
-            'tldr': f'Error generating summary: {error}',
+            'tldr': f'Error generating summary: {error[:100]}',
             'llm_model': self.model_name,
             'generated_at': datetime.utcnow().isoformat()
         }
@@ -365,13 +593,46 @@ GUIDELINES:
         input_tokens = input_chars / 4
         output_tokens = output_chars / 4
         
+        # Pricing as of October 2025 (check official docs for updates)
         if 'flash' in self.model_name:
-            # $0.075 per 1M input, $0.30 per 1M output
+            # Flash models: $0.075 per 1M input, $0.30 per 1M output
             cost = (input_tokens / 1_000_000 * 0.075 + 
                    output_tokens / 1_000_000 * 0.30)
-        else:  # pro
-            # $1.25 per 1M input, $5.00 per 1M output
+        elif 'pro' in self.model_name:
+            # Pro models: $1.25 per 1M input, $5.00 per 1M output
             cost = (input_tokens / 1_000_000 * 1.25 + 
                    output_tokens / 1_000_000 * 5.00)
+        else:
+            cost = 0.0
         
         return cost
+    
+    def get_metrics(self) -> Dict[str, Any]:
+        """Get usage metrics"""
+        return {
+            **self.metrics,
+            'cache_hit_rate': (
+                self.metrics['cache_hits'] / 
+                (self.metrics['api_calls'] + self.metrics['cache_hits'])
+                if (self.metrics['api_calls'] + self.metrics['cache_hits']) > 0
+                else 0
+            ),
+            'estimated_cost': self.estimate_cost(
+                self.metrics['total_tokens_estimate'] * 2,  # Rough input estimate
+                self.metrics['total_tokens_estimate']        # Rough output estimate
+            )
+        }
+    
+    def print_metrics(self):
+        """Print usage statistics"""
+        metrics = self.get_metrics()
+        print("\n" + "="*60)
+        print("📊 Gemini API Usage Metrics")
+        print("="*60)
+        print(f"  API calls: {metrics['api_calls']}")
+        print(f"  Cache hits: {metrics['cache_hits']}")
+        print(f"  Cache hit rate: {metrics['cache_hit_rate']:.1%}")
+        print(f"  Errors: {metrics['errors']}")
+        print(f"  Estimated tokens: {metrics['total_tokens_estimate']:,}")
+        print(f"  Estimated cost: ${metrics['estimated_cost']:.4f}")
+        print("="*60)

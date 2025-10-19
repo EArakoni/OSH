@@ -1,0 +1,15 @@
+{
+  "summary_type": "thread",
+  "subject": "[PATCH 0/4] tools: ynl: Fix tc filters with actions",
+  "tldr": "",
+  "key_points": [],
+  "discussion_summary": "",
+  "resolution": "",
+  "action_items": [],
+  "subsystems": [],
+  "key_contributors": [],
+  "importance": "medium",
+  "thread_type": "discussion",
+  "llm_model": "models/gemini-2.5-flash",
+  "generated_at": "2025-10-19T00:47:05.938286"
+}

@@ -1,55 +1,90 @@
-#!/usr/bin/env python3
-"""
-Parse .eml email files (standard email format)
-Works with emails saved from Gmail, Thunderbird, Outlook, etc.
-"""
-
+import mailbox
 import email
-from email import policy
-from email.parser import BytesParser
-from pathlib import Path
+from email.utils import parsedate_to_datetime
 from typing import List, Dict, Optional
-from datetime import datetime
+import re
+from pathlib import Path
 
-class EMLParser:
-    """Parse .eml email files"""
+class EmailParser:
+    """Parses LKML emails from mbox files"""
     
-    def parse_eml_file(self, eml_path: str) -> Dict:
+    def __init__(self):
+        """Initialize the email parser"""
+        pass
+    
+    def parse_mbox_file(self, mbox_path: str) -> List[Dict]:
         """
-        Parse a single .eml file
+        Parse an mbox file and extract all emails
         
         Args:
-            eml_path: Path to .eml file
+            mbox_path: Path to .mbox file
             
         Returns:
-            Email dictionary compatible with existing database schema
+            List of email dictionaries
+        
+        Steps:
+        1. Open mbox file (standard Unix mailbox format)
+        2. Iterate through each message
+        3. Extract headers and body
+        4. Return structured data
         """
-        print(f"📧 Parsing .eml file: {eml_path}")
+        print(f"📧 Parsing mbox file: {mbox_path}")
         
-        if not Path(eml_path).exists():
-            raise FileNotFoundError(f"EML file not found: {eml_path}")
+        if not Path(mbox_path).exists():
+            raise FileNotFoundError(f"Mbox file not found: {mbox_path}")
         
-        # Read and parse the .eml file
-        with open(eml_path, 'rb') as f:
-            msg = BytesParser(policy=policy.default).parse(f)
+        mbox = mailbox.mbox(mbox_path)
+        emails = []
         
-        # Extract headers
-        message_id = self._clean_message_id(msg.get('Message-ID', ''))
-        subject = self._decode_header(msg.get('Subject', ''))
-        from_addr = self._decode_header(msg.get('From', ''))
-        date_str = msg.get('Date', '')
+        for idx, message in enumerate(mbox):
+            try:
+                email_data = self._parse_message(message)
+                emails.append(email_data)
+                
+                if (idx + 1) % 100 == 0:
+                    print(f"  Parsed {idx + 1} emails...")
+                    
+            except Exception as e:
+                print(f"  ⚠️  Error parsing email {idx}: {e}")
+                continue
         
-        # Parse date
+        print(f"✅ Parsed {len(emails)} emails from {mbox_path}")
+        return emails
+    
+    def _parse_message(self, message: email.message.Message) -> Dict:
+        """
+        Parse a single email message
+        
+        Args:
+            message: Email message object
+            
+        Returns:
+            Dictionary with parsed email data
+            
+        Steps:
+        1. Extract Message-ID (unique identifier)
+        2. Extract subject, from, to, date
+        3. Extract threading info (In-Reply-To, References)
+        4. Extract body content
+        5. Clean and structure the data
+        """
+        # Extract basic headers
+        message_id = self._clean_message_id(message.get('Message-ID', ''))
+        subject = self._decode_header(message.get('Subject', ''))
+        from_addr = self._decode_header(message.get('From', ''))
+        date_str = message.get('Date', '')
+        
+        # Parse date to ISO format
         date_iso = self._parse_date(date_str)
         
-        # Extract threading info
-        in_reply_to = self._clean_message_id(msg.get('In-Reply-To', ''))
-        references = self._parse_references(msg.get('References', ''))
+        # Extract threading information
+        in_reply_to = self._clean_message_id(message.get('In-Reply-To', ''))
+        references = self._parse_references(message.get('References', ''))
         
         # Extract body
-        body = self._extract_body(msg)
+        body = self._extract_body(message)
         
-        email_data = {
+        return {
             'message_id': message_id,
             'subject': subject,
             'from': from_addr,
@@ -57,111 +92,26 @@ class EMLParser:
             'in_reply_to': in_reply_to,
             'references': references,
             'body': body,
-            'raw': str(msg)[:1000]
+            'raw': str(message)[:1000]  # Store first 1000 chars for debugging
         }
-        
-        print(f"✅ Parsed email: {subject[:60]}...")
-        return email_data
-    
-    def parse_digest_eml(self, filepath):
-        """Parse LKML multipart/digest .eml file into individual emails."""
-        with open(filepath, 'rb') as f:
-            msg = BytesParser(policy=policy.default).parse(f)
-
-        emails = []
-
-        # Detect multipart/digest (typical LKML digest format)
-        if msg.get_content_type() == 'multipart/digest':
-            print("📦 Detected multipart/digest format")
-
-            # Each part in multipart/digest is one embedded email
-            for part in msg.iter_parts():
-                if part.get_content_type() == 'message/rfc822':
-                    # Proper embedded email — parse it as a new message
-                    for submsg in part.iter_parts():
-                        emails.append(submsg)
-                elif part.get_content_type() == 'text/plain':
-                    # Skip "Topics" summary text
-                    text_payload = part.get_content()
-                    if "Topics (" in text_payload[:100]:
-                        print("📝 Skipping digest topic summary")
-                    else:
-                        # Sometimes plain text parts are actual messages (rare)
-                        emails.append(part)
-
-        else:
-            # Not multipart/digest — single message
-            emails.append(msg)
-
-        print(f"✅ Extracted {len(emails)} sub-emails from digest")
-        return emails
-
-    def _split_digest(self, digest_email: Dict) -> List[Dict]:
-        """
-        Attempt to split a digest into individual emails
-        
-        This is heuristic-based and may not be perfect.
-        """
-        body = digest_email['body']
-        emails = []
-        
-        # Try to find individual message boundaries
-        # Common patterns: "Message: X", "From: ...", dividers
-        
-        # Simple approach: split on major dividers
-        sections = body.split('----------------------------------------------------------------------')
-        
-        base_date = digest_email['date']
-        
-        for idx, section in enumerate(sections):
-            if len(section.strip()) < 50:  # Skip tiny sections
-                continue
-            
-            # Try to extract subject and from
-            lines = section.strip().split('\n')
-            subject = None
-            from_addr = None
-            
-            for line in lines[:20]:  # Check first 20 lines
-                if line.startswith('Subject:'):
-                    subject = line.replace('Subject:', '').strip()
-                elif line.startswith('From:'):
-                    from_addr = line.replace('From:', '').strip()
-            
-            # Create email entry
-            email_entry = {
-                'message_id': f"{digest_email['message_id']}-part-{idx}",
-                'subject': subject or f"Digest part {idx}",
-                'from': from_addr or 'Unknown',
-                'date': base_date,
-                'in_reply_to': '',
-                'references': [],
-                'body': section.strip(),
-                'raw': section[:1000]
-            }
-            
-            emails.append(email_entry)
-        
-        if len(emails) > 1:
-            print(f"✅ Split digest into {len(emails)} emails")
-        else:
-            print("ℹ️  Could not split digest, treating as single email")
-            emails = [digest_email]
-        
-        return emails
     
     def _clean_message_id(self, message_id: str) -> str:
-        """Clean Message-ID by removing < > brackets"""
+        """
+        Clean Message-ID by removing < > brackets
+        
+        Example: <abc123@kernel.org> -> abc123@kernel.org
+        """
         if not message_id:
-            # Generate a unique ID if missing
-            from hashlib import sha256
-            from datetime import datetime
-            unique_str = f"{datetime.utcnow().isoformat()}"
-            return sha256(unique_str.encode()).hexdigest()[:16]
+            return ''
         return message_id.strip().strip('<>')
     
     def _decode_header(self, header: str) -> str:
-        """Decode email header (handles encoding)"""
+        """
+        Decode email header (handles encoding)
+        
+        Email headers can be encoded (e.g., =?UTF-8?B?...?=)
+        This function decodes them to plain text
+        """
         if not header:
             return ''
         
@@ -177,35 +127,53 @@ class EMLParser:
             
             return decoded_str
         except:
-            return str(header)
+            return header
     
     def _parse_date(self, date_str: str) -> str:
-        """Parse email date to ISO format"""
+        """
+        Parse email date to ISO format
+        
+        Example: "Mon, 18 Oct 2024 10:30:00 -0400" -> "2024-10-18T10:30:00-04:00"
+        """
         if not date_str:
-            return datetime.utcnow().isoformat()
+            return ''
         
         try:
-            from email.utils import parsedate_to_datetime
             dt = parsedate_to_datetime(date_str)
             return dt.isoformat()
         except:
             return date_str
     
     def _parse_references(self, references_str: str) -> List[str]:
-        """Parse References header into list of message IDs"""
+        """
+        Parse References header into list of message IDs
+        
+        References are space-separated message IDs showing email thread history
+        Example: "<id1@example.com> <id2@example.com>" -> ["id1@example.com", "id2@example.com"]
+        """
         if not references_str:
             return []
         
-        import re
+        # Split by whitespace and clean each ID
         message_ids = re.findall(r'<([^>]+)>', references_str)
         return message_ids
     
-    def _extract_body(self, msg: email.message.Message) -> str:
-        """Extract email body text"""
-        body_parts = []
+    def _extract_body(self, message: email.message.Message) -> str:
+        """
+        Extract email body text
         
-        if msg.is_multipart():
-            for part in msg.walk():
+        Emails can be:
+        - Plain text (simple)
+        - Multipart (has attachments, HTML, etc.)
+        
+        We want the plain text part
+        """
+        if message.is_multipart():
+            # Email has multiple parts (text, HTML, attachments)
+            # We only want text/plain parts
+            body_parts = []
+            
+            for part in message.walk():
                 content_type = part.get_content_type()
                 
                 if content_type == 'text/plain':
@@ -216,36 +184,115 @@ class EMLParser:
                             body_parts.append(text)
                     except:
                         continue
+            
+            return '\n'.join(body_parts)
         else:
+            # Simple plain text email
             try:
-                payload = msg.get_payload(decode=True)
+                payload = message.get_payload(decode=True)
                 if payload:
-                    body_parts.append(payload.decode('utf-8', errors='ignore'))
+                    return payload.decode('utf-8', errors='ignore')
             except:
                 pass
         
-        return '\n\n'.join(body_parts) if body_parts else ''
+        return ''
+    
+    def extract_patch_info(self, body: str) -> Optional[Dict]:
+        """
+        Extract patch information if email contains a patch
+        
+        LKML emails often contain patches with format:
+        ---
+         file.c | 10 ++++------
+         1 file changed, 4 insertions(+), 6 deletions(-)
+        
+        This is optional but useful for categorization
+        """
+        if '---' not in body or 'diff' not in body.lower():
+            return None
+        
+        # Simple detection - can be enhanced
+        has_patch = bool(re.search(r'^---$', body, re.MULTILINE))
+        files_changed = len(re.findall(r'\+\+\+ b/', body))
+        
+        return {
+            'has_patch': has_patch,
+            'files_changed': files_changed
+        }
+
+    def parse_eml_file(self, eml_path: str) -> List[Dict]:
+        """
+        Parse a single .eml file or digest .eml file into a list of email dicts.
+        
+        Handles:
+        - Regular single emails
+        - Multipart/digest emails containing multiple sub-messages
+        """
+        print(f"📦 Loading EML file: {eml_path}")
+
+        if not Path(eml_path).exists():
+            raise FileNotFoundError(f"EML file not found: {eml_path}")
+
+        with open(eml_path, 'rb') as f:
+            raw_bytes = f.read()
+
+        msg = email.message_from_bytes(raw_bytes)
+
+        # If this is a digest (multiple emails)
+        if msg.get_content_type() == 'multipart/digest':
+            print("📦 Detected multipart/digest format")
+            sub_emails = self._extract_digest_emails(msg)
+            print(f"✅ Extracted {len(sub_emails)} sub-emails from digest")
+
+            parsed = []
+            for i, sub_msg in enumerate(sub_emails):
+                try:
+                    parsed.append(self._parse_message(sub_msg))
+                    if (i + 1) % 10 == 0:
+                        print(f"  Parsed {i + 1}/{len(sub_emails)} emails...")
+                except Exception as e:
+                    print(f"  ⚠️ Failed to parse sub-email {i + 1}: {e}")
+            return parsed
+
+        # Otherwise, single message
+        try:
+            return [self._parse_message(msg)]
+        except Exception as e:
+            print(f"⚠️ Failed to parse EML file {eml_path}: {e}")
+            return []
 
 
-# Quick test function
-if __name__ == "__main__":
-    import sys
-    
-    if len(sys.argv) < 2:
-        print("Usage: python eml_parser.py <path-to-eml-file>")
-        sys.exit(1)
-    
-    parser = EMLParser()
-    
-    # Try as single email
-    email_data = parser.parse_eml_file(sys.argv[1])
-    
-    print("\n" + "="*60)
-    print("Parsed Email")
-    print("="*60)
-    print(f"Subject: {email_data['subject']}")
-    print(f"From: {email_data['from']}")
-    print(f"Date: {email_data['date']}")
-    print(f"Message-ID: {email_data['message_id']}")
-    print(f"Body length: {len(email_data['body'])} chars")
-    print(f"\nBody preview:\n{email_data['body'][:500]}...")
+    def _extract_digest_emails(self, digest_msg: email.message.Message) -> List[email.message.Message]:
+        """
+        Extract sub-emails from a multipart/digest message.
+
+        Each part in a multipart/digest is itself an email message.
+        """
+        sub_emails = []
+        
+        for part in digest_msg.walk():
+            # Skip the digest wrapper itself
+            if part == digest_msg:
+                continue
+                
+            content_type = part.get_content_type()
+            
+            # Skip the summary text (table of contents)
+            if content_type == "text/plain":
+                continue
+            
+            # Extract actual embedded emails
+            if content_type == "message/rfc822":
+                try:
+                    # get_payload() returns the embedded message
+                    payload = part.get_payload()
+                    if isinstance(payload, list) and len(payload) > 0:
+                        # Sometimes it's a list with one message
+                        sub_emails.append(payload[0])
+                    elif isinstance(payload, email.message.Message):
+                        # Sometimes it's directly a message
+                        sub_emails.append(payload)
+                except Exception as e:
+                    print(f"⚠️ Failed to extract sub-message: {e}")
+        
+        return sub_emails

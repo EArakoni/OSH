@@ -1,5 +1,6 @@
 """
 Summarization service that coordinates between database and Gemini API
+Improved version with better error handling and batch processing
 """
 
 import json
@@ -37,7 +38,7 @@ class LKMLSummarizer:
         if not force:
             existing = self._get_existing_summary(thread_id, 'thread')
             if existing:
-                print(f"✓ Thread {thread_id} already summarized")
+                print(f"✓ Thread {thread_id} already summarized (use --force to regenerate)")
                 return existing
         
         # Get thread data
@@ -71,25 +72,37 @@ class LKMLSummarizer:
         print(f"   Emails: {len(thread_emails)}, Participants: {thread_meta['participant_count']}")
         
         # Generate summary
-        summary_data = self.gemini.summarize_thread(thread_emails, thread_meta)
-        
-        # Store in database
-        self._store_summary(thread_id, 'thread', summary_data)
-        
-        print(f"✅ Thread summary generated")
-        return summary_data
+        try:
+            summary_data = self.gemini.summarize_thread(thread_emails, thread_meta)
+            
+            # Check for errors
+            if summary_data.get('error'):
+                print(f"❌ Summary generation failed: {summary_data['error']}")
+                return None
+            
+            # Store in database
+            self._store_summary(thread_id, 'thread', summary_data)
+            
+            print(f"✅ Thread summary generated")
+            return summary_data
+            
+        except Exception as e:
+            print(f"❌ Error during summarization: {e}")
+            return None
     
     def summarize_all_threads(self, limit: Optional[int] = None, 
-                             min_emails: int = 2) -> int:
+                             min_emails: int = 2,
+                             skip_errors: bool = True) -> Dict[str, int]:
         """
         Summarize all threads in database
         
         Args:
             limit: Maximum number of threads to summarize
             min_emails: Only summarize threads with at least this many emails
+            skip_errors: Continue on errors instead of stopping
             
         Returns:
-            Number of threads summarized
+            Dictionary with success/error counts
         """
         cursor = self.db.conn.cursor()
         
@@ -112,7 +125,11 @@ class LKMLSummarizer:
         print(f"Summarizing {len(threads)} threads")
         print(f"{'='*60}\n")
         
-        success_count = 0
+        stats = {
+            'success': 0,
+            'errors': 0,
+            'skipped': 0
+        }
         total_cost = 0.0
         
         for idx, thread_row in enumerate(threads, 1):
@@ -123,7 +140,7 @@ class LKMLSummarizer:
             try:
                 summary = self.summarize_thread(thread_id)
                 if summary and not summary.get('error'):
-                    success_count += 1
+                    stats['success'] += 1
                     
                     # Estimate cost (rough)
                     cost = self.gemini.estimate_cost(
@@ -131,16 +148,85 @@ class LKMLSummarizer:
                         1000
                     )
                     total_cost += cost
+                else:
+                    stats['errors'] += 1
+                    if not skip_errors:
+                        break
                 
+            except KeyboardInterrupt:
+                print("\n⚠️  Interrupted by user")
+                break
             except Exception as e:
                 print(f"❌ Error: {e}")
+                stats['errors'] += 1
+                if not skip_errors:
+                    break
         
         print(f"\n{'='*60}")
-        print(f"✅ Summarized {success_count}/{len(threads)} threads")
+        print(f"✅ Completed: {stats['success']} successful, {stats['errors']} errors")
         print(f"💰 Estimated cost: ${total_cost:.4f}")
         print(f"{'='*60}\n")
         
-        return success_count
+        # Print Gemini metrics
+        self.gemini.print_metrics()
+        
+        return stats
+    
+    def batch_summarize_emails(self, email_ids: List[int]) -> Dict[str, int]:
+        """
+        Summarize multiple emails efficiently
+        
+        Args:
+            email_ids: List of email IDs to summarize
+            
+        Returns:
+            Dictionary with success/error counts
+        """
+        cursor = self.db.conn.cursor()
+        
+        stats = {
+            'success': 0,
+            'errors': 0,
+            'cached': 0
+        }
+        
+        print(f"\n📧 Batch summarizing {len(email_ids)} emails...")
+        
+        for idx, email_id in enumerate(email_ids, 1):
+            cursor.execute("SELECT * FROM emails WHERE id = ?", (email_id,))
+            email_row = cursor.fetchone()
+            
+            if not email_row:
+                print(f"⚠️  Email {email_id} not found")
+                stats['errors'] += 1
+                continue
+            
+            email = dict(email_row)
+            
+            try:
+                # Check if we got cached result
+                initial_cache_hits = self.gemini.metrics['cache_hits']
+                
+                summary = self.gemini.summarize_email(email)
+                
+                # Was it cached?
+                if self.gemini.metrics['cache_hits'] > initial_cache_hits:
+                    stats['cached'] += 1
+                
+                if not summary.get('error'):
+                    stats['success'] += 1
+                else:
+                    stats['errors'] += 1
+                
+                if idx % 10 == 0:
+                    print(f"  Processed {idx}/{len(email_ids)} emails...")
+                    
+            except Exception as e:
+                print(f"❌ Error summarizing email {email_id}: {e}")
+                stats['errors'] += 1
+        
+        print(f"\n✅ Batch complete: {stats['success']} successful, {stats['cached']} cached, {stats['errors']} errors")
+        return stats
     
     def generate_daily_digest(self, date: str, force: bool = False) -> Optional[Dict]:
         """
@@ -157,7 +243,7 @@ class LKMLSummarizer:
         if not force:
             existing = self._get_existing_digest(date)
             if existing:
-                print(f"✓ Digest for {date} already exists")
+                print(f"✓ Digest for {date} already exists (use --force to regenerate)")
                 return existing
         
         # Get all threads from that day
@@ -168,7 +254,7 @@ class LKMLSummarizer:
             date_obj = datetime.fromisoformat(date)
             next_day = date_obj + timedelta(days=1)
         except ValueError:
-            print(f"❌ Invalid date format: {date}")
+            print(f"❌ Invalid date format: {date}. Use YYYY-MM-DD")
             return None
         
         # Get threads with summaries from that day
@@ -194,7 +280,10 @@ class LKMLSummarizer:
         if unsummarized:
             print(f"   Summarizing {len(unsummarized)} threads first...")
             for thread in unsummarized:
-                self.summarize_thread(thread['id'])
+                try:
+                    self.summarize_thread(thread['id'])
+                except Exception as e:
+                    print(f"   ⚠️  Failed to summarize thread {thread['id']}: {e}")
             
             # Re-fetch with summaries
             cursor.execute("""
@@ -219,13 +308,92 @@ class LKMLSummarizer:
             })
         
         # Generate digest
-        digest_data = self.gemini.generate_daily_digest(threads_data, date)
+        try:
+            digest_data = self.gemini.generate_daily_digest(threads_data, date)
+            
+            if digest_data.get('error'):
+                print(f"❌ Digest generation failed: {digest_data['error']}")
+                return None
+            
+            # Store digest
+            self._store_digest(date, digest_data)
+            
+            print(f"✅ Daily digest generated")
+            return digest_data
+            
+        except Exception as e:
+            print(f"❌ Error generating digest: {e}")
+            return None
+    
+    def generate_weekly_digest(self, start_date: str) -> Optional[Dict]:
+        """
+        Generate weekly digest starting from a specific date
         
-        # Store digest
-        self._store_digest(date, digest_data)
+        Args:
+            start_date: Start date (YYYY-MM-DD)
+            
+        Returns:
+            Weekly digest dictionary or None if error
+        """
+        try:
+            start = datetime.fromisoformat(start_date)
+            end = start + timedelta(days=7)
+        except ValueError:
+            print(f"❌ Invalid date format: {start_date}")
+            return None
         
-        print(f"✅ Daily digest generated")
-        return digest_data
+        cursor = self.db.conn.cursor()
+        
+        # Get all threads from the week
+        cursor.execute("""
+            SELECT t.*, s.tldr, s.mentioned_subsystems
+            FROM threads t
+            LEFT JOIN summaries s ON s.thread_id = t.id AND s.summary_type = 'thread'
+            WHERE t.first_post >= ? AND t.first_post < ?
+            ORDER BY t.email_count DESC
+            LIMIT 50
+        """, (start.isoformat(), end.isoformat()))
+        
+        threads = [dict(row) for row in cursor.fetchall()]
+        
+        if not threads:
+            print(f"❌ No threads found for week starting {start_date}")
+            return None
+        
+        print(f"📅 Generating weekly digest: {start_date} to {end.date()}")
+        print(f"   Top threads: {len(threads)}")
+        
+        # Prepare thread data
+        threads_data = []
+        for thread in threads:
+            threads_data.append({
+                'subject': thread['subject'],
+                'tldr': thread.get('tldr', 'No summary'),
+                'subsystems': json.loads(thread.get('mentioned_subsystems', '[]')) if thread.get('mentioned_subsystems') else [],
+                'email_count': thread['email_count']
+            })
+        
+        # Generate weekly digest (reuse daily digest prompt with adjusted context)
+        try:
+            digest_data = self.gemini.generate_daily_digest(
+                threads_data, 
+                f"{start_date} to {end.date()}"
+            )
+            
+            if digest_data.get('error'):
+                print(f"❌ Weekly digest failed: {digest_data['error']}")
+                return None
+            
+            digest_data['summary_type'] = 'weekly'
+            digest_data['start_date'] = start_date
+            digest_data['end_date'] = str(end.date())
+            
+            print(f"✅ Weekly digest generated")
+            return digest_data
+            
+        except Exception as e:
+            print(f"❌ Error generating weekly digest: {e}")
+            return None
     
     def _get_existing_summary(self, thread_id: int, 
                              summary_type: str) -> Optional[Dict]:
@@ -239,7 +407,17 @@ class LKMLSummarizer:
         """, (thread_id, summary_type))
         
         row = cursor.fetchone()
-        return dict(row) if row else None
+        if row:
+            result = dict(row)
+            # Parse JSON fields
+            if result.get('key_points'):
+                result['key_points'] = json.loads(result['key_points'])
+            if result.get('important_changes'):
+                result['important_changes'] = json.loads(result['important_changes'])
+            if result.get('mentioned_subsystems'):
+                result['mentioned_subsystems'] = json.loads(result['mentioned_subsystems'])
+            return result
+        return None
     
     def _get_existing_digest(self, date: str) -> Optional[Dict]:
         """Check if daily digest already exists"""
@@ -252,7 +430,15 @@ class LKMLSummarizer:
         """, (date,))
         
         row = cursor.fetchone()
-        return dict(row) if row else None
+        if row:
+            result = dict(row)
+            # Parse JSON fields
+            if result.get('key_points'):
+                result['key_points'] = json.loads(result['key_points'])
+            if result.get('important_changes'):
+                result['important_changes'] = json.loads(result['important_changes'])
+            return result
+        return None
     
     def _store_summary(self, thread_id: int, summary_type: str, 
                       summary_data: Dict):
@@ -265,7 +451,8 @@ class LKMLSummarizer:
         important_changes = {
             'resolution': summary_data.get('resolution', ''),
             'action_items': summary_data.get('action_items', []),
-            'discussion_summary': summary_data.get('discussion_summary', '')
+            'discussion_summary': summary_data.get('discussion_summary', ''),
+            'thread_type': summary_data.get('thread_type', 'discussion')
         }
         important_changes_json = json.dumps(important_changes)
         
@@ -348,4 +535,51 @@ class LKMLSummarizer:
         """)
         stats['summarized_threads'] = cursor.fetchone()[0]
         
+        if stats['total_threads'] > 0:
+            stats['summarization_coverage'] = (
+                stats['summarized_threads'] / stats['total_threads'] * 100
+            )
+        
         return stats
+    
+    def print_summary_stats(self):
+        """Print summary statistics"""
+        stats = self.get_summary_stats()
+        
+        print("\n" + "="*60)
+        print("📊 Summarization Statistics")
+        print("="*60)
+        print(f"  Total threads: {stats.get('total_threads', 0)}")
+        print(f"  Summarized threads: {stats.get('summarized_threads', 0)}")
+        
+        if stats.get('summarization_coverage'):
+            print(f"  Coverage: {stats['summarization_coverage']:.1f}%")
+        
+        print(f"  Thread summaries: {stats.get('thread_summaries', 0)}")
+        print(f"  Daily digests: {stats.get('daily_summaries', 0)}")
+        print(f"  Email summaries: {stats.get('email_summaries', 0)}")
+        print("="*60)
+    
+    def get_recent_summaries(self, limit: int = 5) -> List[Dict]:
+        """Get most recent summaries"""
+        cursor = self.db.conn.cursor()
+        
+        cursor.execute("""
+            SELECT s.*, t.subject
+            FROM summaries s
+            LEFT JOIN threads t ON s.thread_id = t.id
+            ORDER BY s.generated_at DESC
+            LIMIT ?
+        """, (limit,))
+        
+        results = []
+        for row in cursor.fetchall():
+            result = dict(row)
+            # Parse JSON fields
+            if result.get('key_points'):
+                result['key_points'] = json.loads(result['key_points'])
+            if result.get('mentioned_subsystems'):
+                result['mentioned_subsystems'] = json.loads(result['mentioned_subsystems'])
+            results.append(result)
+        
+        return results
