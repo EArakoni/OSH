@@ -248,8 +248,10 @@ class EmailParser:
             for i, sub_msg in enumerate(sub_emails):
                 try:
                     parsed.append(self._parse_message(sub_msg))
+                    if (i + 1) % 10 == 0:
+                        print(f"  Parsed {i + 1}/{len(sub_emails)} emails...")
                 except Exception as e:
-                    print(f"  ⚠️ Failed to parse sub-email {i}: {e}")
+                    print(f"  ⚠️ Failed to parse sub-email {i + 1}: {e}")
             return parsed
 
         # Otherwise, single message
@@ -267,17 +269,30 @@ class EmailParser:
         Each part in a multipart/digest is itself an email message.
         """
         sub_emails = []
+        
         for part in digest_msg.walk():
-            if part.get_content_type() == "message/rfc822":
+            # Skip the digest wrapper itself
+            if part == digest_msg:
+                continue
+                
+            content_type = part.get_content_type()
+            
+            # Skip the summary text (table of contents)
+            if content_type == "text/plain":
+                continue
+            
+            # Extract actual embedded emails
+            if content_type == "message/rfc822":
                 try:
-                    # Each part is a full email message
+                    # get_payload() returns the embedded message
                     payload = part.get_payload()
-                    if isinstance(payload, list):
-                        # message/rfc822 parts are often a 1-element list
-                        sub_emails.extend(payload)
+                    if isinstance(payload, list) and len(payload) > 0:
+                        # Sometimes it's a list with one message
+                        sub_emails.append(payload[0])
                     elif isinstance(payload, email.message.Message):
+                        # Sometimes it's directly a message
                         sub_emails.append(payload)
                 except Exception as e:
                     print(f"⚠️ Failed to extract sub-message: {e}")
+        
         return sub_emails
-
