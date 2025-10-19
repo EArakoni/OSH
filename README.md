@@ -167,7 +167,7 @@ cd ../Frontend
 # Install dependencies
 npm install
 
-# Configure Auth0 (see docs/AUTH0_SETUP.md)
+# Configure Auth0 (see Documentation/AUTH0_SETUP.md)
 cp .env.example .env
 # Edit .env with your Auth0 credentials
 
@@ -201,15 +201,15 @@ Comprehensive documentation for contributors, users, and developers:
 
 | Document | Description |
 |----------|-------------|
-| **[Setup Guide](docs/SETUP.md)** | Detailed installation and configuration |
-| **[API Documentation](docs/API_DOCS.md)** | Complete REST API reference with examples |
-| **[Frontend Integration](docs/FRONTEND_INTEGRATION.md)** | React components and TypeScript interfaces |
-| **[Gemini Integration](docs/GEMINI_INTEGRATION.md)** | AI summarization implementation details |
-| **[Auth0 Setup](docs/AUTH0_SETUP.md)** | Authentication configuration guide |
-| **[Troubleshooting](docs/TROUBLESHOOTING.md)** | Common issues and solutions |
+| **[Setup Guide](Documentation/SETUP.md)** | Detailed installation and configuration |
+| **[API Documentation](Documentation/API_DOCS.md)** | Complete REST API reference with examples |
+| **[Frontend Integration](Documentation/FRONTEND_INTEGRATION.md)** | React components and TypeScript interfaces |
+| **[Gemini Integration](Documentation/GEMINI_INTEGRATION.md)** | AI summarization implementation details |
+| **[Auth0 Setup](Documentation/AUTH0_SETUP.md)** | Authentication configuration guide |
+| **[Troubleshooting](Documentation/TROUBLESHOOTING.md)** | Common issues and solutions |
 | **[Contributing Guidelines](CONTRIBUTING.md)** | How to contribute to this project |
 | **[Code of Conduct](CODE_OF_CONDUCT.md)** | Community guidelines |
-| **[Architecture](docs/ARCHITECTURE.md)** | Technical deep dive |
+| **[Architecture](Documentation/ARCHITECTURE.md)** | Technical deep dive |
 
 ---
 
@@ -283,7 +283,7 @@ cost_per_thread = $0.006 (without caching)
 }
 ```
 
-See [Gemini Integration Guide](docs/GEMINI_INTEGRATION.md) for technical details.
+See [Gemini Integration Guide](Documentation/GEMINI_INTEGRATION.md) for technical details.
 
 ---
 
@@ -306,7 +306,7 @@ const { loginWithRedirect } = useAuth0();
 - 🌐 Passwordless options
 - 👥 Role-based access control
 
-See [Auth0 Setup Guide](docs/AUTH0_SETUP.md) for configuration.
+See [Auth0 Setup Guide](Documentation/AUTH0_SETUP.md) for configuration.
 
 ---
 
@@ -432,10 +432,10 @@ Built with ❤️ by:
 
 ## 📞 Support
 
-- 📖 **Documentation:** [docs/](docs/)
-- 🐛 **Issues:** [GitHub Issues](https://github.com/yourusername/lkml-dashboard/issues)
-- 💬 **Discussions:** [GitHub Discussions](https://github.com/yourusername/lkml-dashboard/discussions)
-- 📧 **Email:** your.email@example.com
+- 📖 **Documentation:** [Documentation/](Documentation/)
+- 🐛 **Issues:** [GitHub Issues](https://github.com/EArakoni/OSH/issues)
+- 💬 **Discussions:** [GitHub Discussions](https://github.com/EArakoni/OSH/discussions)
+- 📧 **Email:** karalar.alpefe@gmail.com
 
 ---
 
