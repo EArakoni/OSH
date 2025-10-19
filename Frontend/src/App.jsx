@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   BookOpen, Home, LogOut, Lock, Menu, X,
   Search, User, Unlock
-} from 'react-feather';
+} from 'lucide-react';
 
 const App = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -11,33 +11,55 @@ const App = () => {
   const [selectedPost, setSelectedPost] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const auth0Domain = 'dev-gsykrp7lbzxn8prq.us.auth0.com';
   const auth0ClientId = 'rMibqVnfRKY7kSlDeFVNZWdGLRYtXltH';
   const redirectUri = window.location.origin;
+  const API_URL = 'http://localhost:5000';
 
   useEffect(() => {
-    fetch('http://localhost:5000/api/threads')
-      .then(res => res.json())
-      .then(data => {
-        const normalized = Array.isArray(data.threads)
-          ? data.threads.map(thread => ({
-              id: thread.id,
-              title: thread.subject || 'Untitled Patch',
-              author: `Participants: ${thread.participant_count}`,
-              date: thread.last_post?.split('T')[0] || 'Unknown Date',
-              excerpt: thread.tldr || 'No summary available.',
-              tags: thread.tags || [],
-              simplified: thread.tldr || '',
-              content: thread.tldr || ''
-            }))
-          : [];
-        setPosts(normalized);
-      })
-      .catch(err => console.error('Error fetching patches:', err));
-
+    fetchThreads();
     checkAuth();
   }, []);
+
+  const fetchThreads = async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`${API_URL}/api/threads?limit=50&sort=recent`);
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      const normalized = Array.isArray(data.threads)
+        ? data.threads.map(thread => ({
+          id: thread.id,
+          title: thread.subject || 'Untitled Patch',
+          author: `${thread.participant_count} participants`,
+          date: thread.last_post?.split('T')[0] || 'Unknown Date',
+          excerpt: thread.tldr || 'No summary available.',
+          tags: thread.tags || [],
+          subsystems: thread.subsystems || [],
+          simplified: thread.tldr || '',
+          content: thread.tldr || '',
+          emailCount: thread.email_count || 0
+        }))
+        : [];
+
+      setPosts(normalized);
+    } catch (err) {
+      console.error('Error fetching threads:', err);
+      setError(`Failed to load threads: ${err.message}. Is the backend running on ${API_URL}?`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const checkAuth = () => {
     const hash = window.location.hash;
@@ -69,7 +91,8 @@ const App = () => {
 
   const filteredPosts = posts.filter(post =>
     post?.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    post?.tags?.some(tag => tag?.toLowerCase().includes(searchTerm.toLowerCase()))
+    post?.tags?.some(tag => tag?.toLowerCase().includes(searchTerm.toLowerCase())) ||
+    post?.subsystems?.some(sub => sub?.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   return (
@@ -86,7 +109,7 @@ const App = () => {
             </h1>
           </div>
           <nav className="hidden md:flex items-center space-x-6">
-            <button onClick={() => setSelectedPost(null)} className="text-gray-300 hover:text-white flex items-center space-x-2">
+            <button onClick={() => setSelectedPost(null)} className="text-gray-300 hover:text-white flex items-center space-x-2 transition">
               <Home className="w-4 h-4" /><span>Home</span>
             </button>
             {isAuthenticated ? (
@@ -95,13 +118,13 @@ const App = () => {
                   <img src={user?.picture} alt={user?.name} className="w-8 h-8 rounded-full" />
                   <span className="text-sm">{user?.name}</span>
                 </div>
-                <button onClick={logout} className="px-4 py-2 bg-red-500/20 text-red-300 rounded-lg hover:bg-red-500/30 flex items-center space-x-2">
+                <button onClick={logout} className="px-4 py-2 bg-red-500/20 text-red-300 rounded-lg hover:bg-red-500/30 flex items-center space-x-2 transition">
                   <LogOut className="w-4 h-4" /><span>Logout</span>
                 </button>
               </div>
             ) : (
-              <button onClick={login} className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 flex items-center space-x-2">
-                <Lock className="w-4 h-4" /><span>Login with Auth0</span>
+              <button onClick={login} className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 flex items-center space-x-2 transition">
+                <Lock className="w-4 h-4" /><span>Login</span>
               </button>
             )}
           </nav>
@@ -111,9 +134,46 @@ const App = () => {
         </div>
       </header>
 
-      {/* Main */}
-      {/* Paste your completed <main> block here from earlier */}
+      {/* Mobile Menu */}
+      {mobileMenuOpen && (
+        <div className="md:hidden bg-black/95 backdrop-blur-md border-b border-purple-500/20 p-4">
+          <nav className="flex flex-col space-y-3">
+            <button onClick={() => { setSelectedPost(null); setMobileMenuOpen(false); }} className="text-gray-300 hover:text-white flex items-center space-x-2">
+              <Home className="w-4 h-4" /><span>Home</span>
+            </button>
+            {isAuthenticated ? (
+              <>
+                <div className="flex items-center space-x-2 text-gray-300 py-2">
+                  <img src={user?.picture} alt={user?.name} className="w-8 h-8 rounded-full" />
+                  <span className="text-sm">{user?.name}</span>
+                </div>
+                <button onClick={logout} className="px-4 py-2 bg-red-500/20 text-red-300 rounded-lg hover:bg-red-500/30 flex items-center space-x-2">
+                  <LogOut className="w-4 h-4" /><span>Logout</span>
+                </button>
+              </>
+            ) : (
+              <button onClick={login} className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 flex items-center space-x-2">
+                <Lock className="w-4 h-4" /><span>Login</span>
+              </button>
+            )}
+          </nav>
+        </div>
+      )}
+
+      {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        {error && (
+          <div className="mb-8 bg-red-500/10 border border-red-500/30 rounded-xl p-4">
+            <p className="text-red-300">{error}</p>
+            <button
+              onClick={fetchThreads}
+              className="mt-2 px-4 py-2 bg-red-500/20 text-red-300 rounded-lg hover:bg-red-500/30"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
         {!selectedPost ? (
           <>
             <div className="text-center mb-12">
@@ -125,7 +185,7 @@ const App = () => {
                 <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
                 <input
                   type="text"
-                  placeholder="Search patches..."
+                  placeholder="Search patches by title, tag, or subsystem..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="w-full pl-12 pr-4 py-4 bg-white/10 backdrop-blur-md border border-purple-500/30 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
@@ -133,64 +193,102 @@ const App = () => {
               </div>
             </div>
 
-            {/* Patch Cards */}
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredPosts.map(post => (
-                <article
-                  key={post.id}
-                  className="bg-white/5 backdrop-blur-md border border-purple-500/20 rounded-xl p-6 hover:bg-white/10 transition cursor-pointer group"
-                  onClick={() => setSelectedPost(post)}
-                >
-                  <h3 className="text-xl font-semibold text-white mb-2 group-hover:text-purple-300 transition">{post.title}</h3>
-                  <div className="flex items-center space-x-2 text-sm text-gray-400 mb-3">
-                    <User className="w-3 h-3" />
-                    <span>{post.author}</span>
-                    <span>•</span>
-                    <span>{post.date}</span>
+            {loading ? (
+              <div className="text-center py-12">
+                <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500"></div>
+                <p className="text-gray-300 mt-4">Loading patches...</p>
+              </div>
+            ) : (
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredPosts.length === 0 ? (
+                  <div className="col-span-full text-center py-12">
+                    <p className="text-gray-400 text-lg">No patches found matching your search.</p>
                   </div>
-                  <p className="text-gray-300 mb-4 line-clamp-3">{post.excerpt}</p>
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    {post.tags.map(tag => (
-                      <span key={tag} className="px-3 py-1 bg-purple-500/20 text-purple-300 rounded-full text-xs">{tag}</span>
-                    ))}
-                  </div>
-                  {isAuthenticated ? (
-                    <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3">
-                      <p className="text-sm text-green-300 flex items-start">
-                        <Unlock className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" />
-                        <span className="italic">{post.simplified}</span>
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="bg-purple-500/10 border border-purple-500/30 rounded-lg p-3 text-center">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          login();
-                        }}
-                        className="text-sm text-purple-300 hover:text-purple-200 transition"
-                      >
-                        🔒 Login to see AI simplification
-                      </button>
-                    </div>
-                  )}
-                </article>
-              ))}
-            </div>
+                ) : (
+                  filteredPosts.map(post => (
+                    <article
+                      key={post.id}
+                      className="bg-white/5 backdrop-blur-md border border-purple-500/20 rounded-xl p-6 hover:bg-white/10 transition cursor-pointer group"
+                      onClick={() => setSelectedPost(post)}
+                    >
+                      <h3 className="text-xl font-semibold text-white mb-2 group-hover:text-purple-300 transition line-clamp-2">
+                        {post.title}
+                      </h3>
+                      <div className="flex items-center space-x-2 text-sm text-gray-400 mb-3">
+                        <User className="w-3 h-3" />
+                        <span>{post.author}</span>
+                        <span>•</span>
+                        <span>{post.date}</span>
+                        <span>•</span>
+                        <span>{post.emailCount} emails</span>
+                      </div>
+                      <p className="text-gray-300 mb-4 line-clamp-3">{post.excerpt}</p>
+                      <div className="flex flex-wrap gap-2 mb-4">
+                        {post.tags.map(tag => (
+                          <span key={tag} className="px-3 py-1 bg-purple-500/20 text-purple-300 rounded-full text-xs">
+                            {tag}
+                          </span>
+                        ))}
+                        {post.subsystems.map(sub => (
+                          <span key={sub} className="px-3 py-1 bg-blue-500/20 text-blue-300 rounded-full text-xs">
+                            {sub}
+                          </span>
+                        ))}
+                      </div>
+                      {isAuthenticated ? (
+                        <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3">
+                          <p className="text-sm text-green-300 flex items-start">
+                            <Unlock className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" />
+                            <span className="italic">{post.simplified}</span>
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="bg-purple-500/10 border border-purple-500/30 rounded-lg p-3 text-center">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              login();
+                            }}
+                            className="text-sm text-purple-300 hover:text-purple-200 transition"
+                          >
+                            🔒 Login to see AI summary
+                          </button>
+                        </div>
+                      )}
+                    </article>
+                  ))
+                )}
+              </div>
+            )}
           </>
         ) : (
           <div className="max-w-4xl mx-auto">
-            <button onClick={() => setSelectedPost(null)} className="mb-6 text-purple-300 hover:text-purple-200 transition flex items-center space-x-2">
-              <span>←</span><span>Back to all posts</span>
+            <button
+              onClick={() => setSelectedPost(null)}
+              className="mb-6 text-purple-300 hover:text-purple-200 transition flex items-center space-x-2"
+            >
+              <span>←</span><span>Back to all patches</span>
             </button>
             <article className="bg-white/5 backdrop-blur-md border border-purple-500/20 rounded-xl p-8">
               <h1 className="text-4xl font-bold text-white mb-4">{selectedPost.title}</h1>
               <div className="flex items-center space-x-3 text-gray-400 mb-6">
-                <User className="w-4 h-4" /><span>{selectedPost.author}</span><span>•</span><span>{selectedPost.date}</span>
+                <User className="w-4 h-4" />
+                <span>{selectedPost.author}</span>
+                <span>•</span>
+                <span>{selectedPost.date}</span>
+                <span>•</span>
+                <span>{selectedPost.emailCount} emails in thread</span>
               </div>
               <div className="flex flex-wrap gap-2 mb-6">
                 {selectedPost.tags.map(tag => (
-                  <span key={tag} className="px-3 py-1 bg-purple-500/20 text-purple-300 rounded-full text-sm">{tag}</span>
+                  <span key={tag} className="px-3 py-1 bg-purple-500/20 text-purple-300 rounded-full text-sm">
+                    {tag}
+                  </span>
+                ))}
+                {selectedPost.subsystems.map(sub => (
+                  <span key={sub} className="px-3 py-1 bg-blue-500/20 text-blue-300 rounded-full text-sm">
+                    {sub}
+                  </span>
                 ))}
               </div>
               {isAuthenticated && (
@@ -208,9 +306,8 @@ const App = () => {
           </div>
         )}
       </main>
-
     </div>
-  );}
+  );
+};
 
 export default App;
-
