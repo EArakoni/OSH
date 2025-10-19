@@ -8,7 +8,7 @@ __pycache__/
 *.db-journal
 
 # Gemini cache
-cache/
+cache/*
 
 # Atom feeds
 #*.atom
