@@ -29,7 +29,7 @@ const App = () => {
     setError(null);
 
     try {
-      const response = await fetch(`${API_URL}/api/threads?limit=50&sort=recent`);
+      const response = await fetch(`${API_URL}/api/threads?limit=50&sort=active`);
 
       if (!response.ok) {
         throw new Error(`API returned ${response.status}`);
