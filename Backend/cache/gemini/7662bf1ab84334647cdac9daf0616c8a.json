@@ -1,15 +1,29 @@
 {
   "summary_type": "thread",
   "subject": "[PATCH v2 2/2] ACPI: TAD: Improve runtime PM using guard macros",
-  "tldr": "",
-  "key_points": [],
-  "discussion_summary": "",
-  "resolution": "",
-  "action_items": [],
-  "subsystems": [],
-  "key_contributors": [],
+  "tldr": "Rafael Wysocki proposes a v2 patch to improve ACPI TAD driver's runtime PM by using `pm_runtime_get_noresume`/`put_noidle` and `ACQUIRE` guard macros for simplified cleanup and error handling.",
+  "key_points": [
+    "Refactors `acpi_tad_remove()` to use `pm_runtime_get_noresume()` and `pm_runtime_put_noidle()` for safer PM state transitions.",
+    "Introduces `ACQUIRE(pm_runtime_active_try, pm)` and `ACQUIRE_ERR` macros for simplified runtime PM cleanup and error handling.",
+    "Uses `guard pm_runtime_noresume` to simplify `acpi_tad_remove()`.",
+    "No intentional functional impact, primarily code simplification and robustness.",
+    "This is a `v2` patch, with previous controversial parts dropped."
+  ],
+  "discussion_summary": "The thread introduces a `v2` patch, `[PATCH v2 2/2] ACPI: TAD: Improve runtime PM using guard macros`, authored by Rafael J. Wysocki. This version supersedes a previous submission, with the first patch of the prior series being dropped due to controversy. The current `[2/2]` patch, previously `[3/3]`, has been updated to utilize the `ACQUIRE()/ACQUIRE_ERR()` syntax for runtime PM operations.\n\nThe patch focuses on two main areas within the `drivers/acpi/acpi_tad.c` file. Firstly, it refactors the `acpi_tad_remove()` function. Instead of resuming the device upfront, it replaces `pm_runtime_get_sync()` with `pm_runtime_get_noresume()` to prevent the device from suspending between calls to `acpi_tad_disable_timer()` and `acpi_tad_clear_status()`, which already handle device resume. This change is complemented by using `pm_runtime_put_noidle()` to decrement the usage counter and `pm_runtime_suspend()` for subsequent device suspension, following a common PM pattern.\n\nSecondly, the patch introduces the use of `guard pm_runtime_active_try` and `guard pm_runtime_noresume` macros. These macros simplify runtime PM cleanup and enhance error handling in various functions, as demonstrated by the replacement of explicit `pm_runtime_get_sync()` and `pm_runtime_put_sync()` calls with the `ACQUIRE(pm_runtime_active_try, pm)` macro and its corresponding `ACQUIRE_ERR` check. The overall goal is to improve the robustness and readability of the runtime PM code without introducing intentional functional changes.",
+  "resolution": "ongoing",
+  "action_items": [
+    "Review and merge the proposed patch."
+  ],
+  "subsystems": [
+    "ACPI",
+    "Power Management",
+    "Drivers"
+  ],
+  "key_contributors": [
+    "Rafael J. Wysocki"
+  ],
   "importance": "medium",
-  "thread_type": "discussion",
+  "thread_type": "patch_review",
   "llm_model": "gemini-2.5-flash",
-  "generated_at": "2025-10-19T00:58:17.807796"
+  "generated_at": "2025-10-19T01:43:40.694284"
 }

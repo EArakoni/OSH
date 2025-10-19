@@ -1,15 +1,38 @@
 {
   "summary_type": "thread",
   "subject": "[PATCH v7 00/11] Add Enclustra Arria10 and Cyclone5 SoMs",
-  "tldr": "",
-  "key_points": [],
-  "discussion_summary": "",
-  "resolution": "",
-  "action_items": [],
-  "subsystems": [],
-  "key_contributors": [],
+  "tldr": "Resubmitted v7 patches add modular Device Tree support for Enclustra Arria10 and Cyclone5 SoMs, carrier boards, and boot modes, addressing prior Intel/Altera maintainership issues.",
+  "key_points": [
+    "Resubmission (v7) of patches to add Enclustra Arria10 and Cyclone5 SoM support.",
+    "Previous submission stalled due to Intel/Altera maintainership issues.",
+    "New modular Device Tree approach for Enclustra SoMs, carrier boards, and boot modes.",
+    "Introduces generic `.dtsi` files for boot modes and carrier boards.",
+    "Adds specific `.dts` files for various SoM/carrier/boot mode combinations.",
+    "Removes older, less modular Device Tree files and redundant binding entries.",
+    "Patches have received `Acked-by` tags from Steffen Trumtrar and Krzysztof Kozlowski.",
+    "Awaiting feedback from primary Intel/Altera maintainers."
+  ],
+  "discussion_summary": "This thread presents the seventh version of a patch series aimed at integrating comprehensive Device Tree support for Enclustra's Arria10 and Cyclone5 System-on-Modules (SoMs) into the Linux kernel. The initial submission in November 2024 stalled due to an \"ongoing complex situation with Intel's maintainership.\" The author, motivated by recent discussions and information about Altera resuming maintainership, resubmitted the series, hoping for a response from the newly involved maintainers (Matthew Gerlach, Tien Fong Chee).\n\nThe patch series adopts a modular approach, introducing generic `.dtsi` files for boot modes and carrier boards, and specific `.dts` files for various combinations of SoMs, carrier boards (Mercury+ PE1, PE3, ST1), and boot media (SD, eMMC, QSPI). This modularity allows for flexible hardware configuration. Concurrently, the series removes older, less modular Device Tree files and a redundant binding entry, streamlining the existing codebase. Several patches have already received `Acked-by` tags from relevant subsystem maintainers, indicating initial positive review. The author is currently awaiting feedback from the primary Intel/Altera maintainers.",
+  "resolution": "Ongoing. Patches have been submitted and some have received `Acked-by` tags. The author is waiting for review and potential acceptance by the main Intel/Altera maintainers.",
+  "action_items": [
+    "Intel/Altera maintainers (Matthew Gerlach, Tien Fong Chee) to review and apply the patch series.",
+    "Author to address any further review comments."
+  ],
+  "subsystems": [
+    "arch/arm/boot/dts",
+    "Documentation/devicetree/bindings"
+  ],
+  "key_contributors": [
+    "Andreas Buerkler",
+    "Lothar Rubusch",
+    "Steffen Trumtrar",
+    "Krzysztof Kozlowski",
+    "Matthew Gerlach",
+    "Tien Fong Chee",
+    "Arnd Bergmann"
+  ],
   "importance": "medium",
-  "thread_type": "discussion",
+  "thread_type": "patch_review",
   "llm_model": "gemini-2.5-flash",
-  "generated_at": "2025-10-19T00:58:28.794014"
+  "generated_at": "2025-10-19T01:43:57.909899"
 }
